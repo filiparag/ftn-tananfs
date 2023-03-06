@@ -28,6 +28,8 @@ impl Inode {
     }
 }
 
+impl AsBitmap for Inode {}
+
 impl PermanentIndexed for Inode {
     type Error = crate::Error;
 

@@ -9,7 +9,7 @@ const BITS_IN_BYTE: u64 = size_of::<u8>() as u64;
 const BYTES_IN_USIZE: u64 = size_of::<usize>() as u64;
 const BITS_IN_USIZE: u64 = BYTES_IN_USIZE * BITS_IN_BYTE;
 
-impl<T> Bitmap<T> {
+impl<T: AsBitmap> Bitmap<T> {
     /// Return empty bitmap with size as power of 2
     fn empty(count: u64, position: u64) -> Self {
         Self {

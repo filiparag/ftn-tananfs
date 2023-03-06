@@ -1,6 +1,7 @@
 #![allow(unused)]
 
 mod bitmap;
+mod block;
 mod inode;
 mod superblock;
 
@@ -27,6 +28,8 @@ pub(crate) trait PermanentIndexed: Sized {
         superblock: &Superblock,
     ) -> Result<(), Self::Error>;
 }
+
+pub trait AsBitmap {}
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C, packed)]
@@ -100,7 +103,7 @@ pub struct Block {
 }
 
 #[derive(Debug, Clone)]
-pub struct Bitmap<T> {
+pub struct Bitmap<T: AsBitmap> {
     /// Bits mapping to indexes
     pub bitfield: Vec<usize>,
     /// Number of valid indexes
