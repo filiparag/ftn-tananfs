@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use error::Error;
 mod error;
 mod structs;

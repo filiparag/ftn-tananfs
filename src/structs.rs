@@ -1,5 +1,3 @@
-#![allow(unused)]
-
 mod bitmap;
 mod block;
 mod inode;

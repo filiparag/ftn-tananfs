@@ -22,7 +22,7 @@ impl Inode {
             uid: self.uid,
             gid: self.gid,
             rdev: 0, // unimplemented
-            blksize: superblock.block_size as u32,
+            blksize: superblock.block_size,
             flags: 0, // unimplemented
         }
     }
