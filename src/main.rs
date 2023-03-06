@@ -1,3 +1,4 @@
+use error::Error;
 mod error;
 mod structs;
 

@@ -11,8 +11,6 @@ use std::{
 
 use fuser::FileType;
 
-const BITMAP_WORD: u64 = std::mem::size_of::<usize>() as u64;
-const BITMAP_MIN_SIZE: u64 = 1024;
 const DATA_PER_INODE: u64 = 4096;
 const MAGIC_SIGNATURE: u16 = 0xEF53;
 
