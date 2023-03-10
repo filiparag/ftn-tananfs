@@ -83,3 +83,20 @@ impl Default for Inode {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use super::{Inode, PermanentIndexed};
+    use crate::structs::Superblock;
+
+    #[test]
+    fn load_and_flush() {
+        let superblock = Superblock::new(100_000, 4096);
+        let mut dev = Cursor::new(vec![0u8; superblock.block_region_start() as usize]);
+        let inode = Inode::load(&mut dev, &superblock, 10);
+        assert!(inode.is_ok());
+        assert!(inode.unwrap().flush(&mut dev, &superblock).is_ok());
+    }
+}

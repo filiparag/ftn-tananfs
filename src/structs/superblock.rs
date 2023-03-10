@@ -106,3 +106,53 @@ impl Superblock {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::structs::{Bitmap, Block, Inode};
+
+    use super::Superblock;
+
+    #[test]
+    fn size() {
+        assert_eq!(std::mem::size_of::<Superblock>(), 1024);
+    }
+
+    #[test]
+    fn align_position() {
+        let superblock = Superblock::new(2048, 512);
+        assert_eq!(superblock.align_to_block_start(3000), 3072);
+        assert_eq!(superblock.align_to_block_start(4000), 4096);
+        assert_eq!(superblock.align_to_block_start(5000), 5120);
+        assert_eq!(superblock.align_to_block_start(5500), 5632);
+    }
+
+    #[test]
+    fn regions() {
+        for block_exp in 9..=14 {
+            let block_size = 1u64 << block_exp;
+            let superblock = Superblock::new(100_000_000, block_size as u32);
+            assert_eq!(
+                superblock.bitmap_region_start(),
+                block_size + std::mem::size_of::<Superblock>() as u64
+            );
+            let inodes = block_size
+                + std::mem::size_of::<Superblock>() as u64
+                + (Bitmap::<Inode>::size(superblock.inode_count)
+                    + Bitmap::<Block>::size(superblock.block_count)) as u64;
+            assert_eq!(
+                superblock.inode_region_start(),
+                superblock.align_to_block_start(inodes)
+            );
+            let blocks = inodes + superblock.inode_count * std::mem::size_of::<Inode>() as u64;
+            assert_eq!(
+                superblock.block_region_start(),
+                superblock.align_to_block_start(blocks)
+            );
+            assert_eq!(
+                superblock.block_region_end(),
+                superblock.align_to_block_start(blocks) + superblock.block_count * block_size
+            );
+        }
+    }
+}
