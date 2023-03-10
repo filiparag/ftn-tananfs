@@ -92,10 +92,3 @@ impl Superblock {
         }
     }
 }
-
-impl From<&Superblock> for &[u8] {
-    fn from(data: &Superblock) -> Self {
-        let raw = data as *const Superblock as *const u8;
-        unsafe { core::slice::from_raw_parts(raw, std::mem::size_of::<Superblock>()) }
-    }
-}

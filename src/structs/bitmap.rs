@@ -4,9 +4,10 @@ use std::mem::size_of;
 use super::*;
 use crate::Error;
 
-const MINIMUM_SIZE: u64 = 1024;
-const BITS_IN_BYTE: u64 = 8;
-const BYTES_IN_USIZE: u64 = size_of::<usize>() as u64;
+pub const MINIMUM_SIZE: u64 = 1024;
+pub const BITS_IN_BYTE: u64 = 8;
+pub const BYTES_IN_USIZE: u64 = size_of::<usize>() as u64;
+pub const BITS_IN_USIZE: u64 = BYTES_IN_USIZE * BITS_IN_BYTE;
 
 impl<T: AsBitmap> Bitmap<T> {
     /// Return empty bitmap with size as power of 2
@@ -101,6 +102,24 @@ impl<T: AsBitmap> Bitmap<T> {
         }
         block_device.write_all(&buffer)?;
         Ok(())
+    }
+
+    /// Get index of first empty field starting at `after`
+    pub(crate) fn next_free(&self, after: u64) -> Option<u64> {
+        let after_chunk = after / BITS_IN_USIZE;
+        let after_bit = after % BITS_IN_USIZE;
+        for chunk in after_chunk as usize..self.bitfield.len() {
+            if self.bitfield[chunk] == usize::MAX {
+                continue;
+            }
+            for bit in after_bit..(BYTES_IN_USIZE * BITS_IN_BYTE) {
+                if self.bitfield[chunk] & 1usize << bit == 0 {
+                    let index = chunk as u64 * BYTES_IN_USIZE * BITS_IN_BYTE + bit;
+                    return Some(index);
+                }
+            }
+        }
+        None
     }
 }
 

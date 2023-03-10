@@ -10,8 +10,11 @@ use std::{
 
 use fuser::FileType;
 
-const DATA_PER_INODE: u64 = 4096;
-const MAGIC_SIGNATURE: u16 = 0xEF53;
+pub use bitmap::*;
+
+pub const BLOCKS_IN_INODE: usize = 6;
+pub const DATA_PER_INODE: u64 = 4096;
+pub const MAGIC_SIGNATURE: u16 = 0xEF53;
 
 pub(crate) trait PermanentIndexed: Sized {
     type Error;
@@ -43,11 +46,11 @@ pub struct Superblock {
     /// Block size in bytes
     pub(crate) block_size: u32,
     #[doc(hidden)]
-    __padding_1: [u8; 20],
+    pub(crate) __padding_1: [u8; 20],
     /// Magic signature
     pub(crate) magic: u16,
     #[doc(hidden)]
-    __padding_2: [u8; 966],
+    pub(crate) __padding_2: [u8; 966],
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -75,20 +78,13 @@ pub struct Inode {
     pub(crate) dtime: u64,
     /// Occupied block count
     pub(crate) block_count: u64,
-    /// File is stored in contiguous blocks
-    /// starting from [`blocks`](Self::blocks)`[0]`
-    /// and ending after [`block_count`](Self::block_count) blocks
-    pub(crate) block_range: bool,
-    /// Block occupation exceeds [`blocks`](Self::blocks) size, and
-    /// is continued in extent sequence residing in
-    /// block [`blocks_extra`](Self::blocks_extra)
-    pub(crate) extent_sequence: bool,
     /// Beginning of sequence of blocks containing file's data
-    pub(crate) blocks: [u64; 6],
+    pub(crate) blocks: [u64; BLOCKS_IN_INODE],
     #[doc(hidden)]
-    __padding_1: [bool; 3],
+    pub(crate) __padding_1: [bool; 5],
     /// Block containing continuation of block sequence if
-    /// [`extent_sequence`](Self::extent_sequence) is `true`
+    /// [`block_count`](Self::block_count) is larger than length of [`blocks`](Self::blocks).
+    /// Every extra block references next in sequence in its first 8 bytes.
     pub(crate) blocks_extra: u64,
 }
 
