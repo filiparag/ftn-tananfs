@@ -92,6 +92,11 @@ mod tests {
     use crate::structs::Superblock;
 
     #[test]
+    fn size() {
+        assert_eq!(std::mem::size_of::<Inode>(), 128);
+    }
+
+    #[test]
     fn load_and_flush() {
         let superblock = Superblock::new(100_000, 4096);
         let mut dev = Cursor::new(vec![0u8; superblock.block_region_start() as usize]);

@@ -13,7 +13,7 @@ impl<T: AsBitmap> Bitmap<T> {
     /// Return empty bitmap with size as power of 2
     fn empty(count: u64, position: u64) -> Self {
         Self {
-            bitfield: vec![0; Self::size(count)],
+            bitfield: vec![0; Self::size_in_usize(count)],
             count,
             position,
             __type: PhantomData,
@@ -22,12 +22,17 @@ impl<T: AsBitmap> Bitmap<T> {
 
     /// Calculate appropriate size in [`usize`] for bitmap
     /// Minimum size is 1024 bytes, and grows as count's next power of 2
-    pub(super) fn size(count: u64) -> usize {
-        let length = count.next_power_of_two();
+    pub(super) fn size_in_usize(count: u64) -> usize {
+        (Self::size_in_bytes(count) / BYTES_IN_USIZE) as usize
+    }
+
+    /// Calculate appropriate size in [`u8`] for bitmap
+    pub(super) fn size_in_bytes(count: u64) -> u64 {
+        let length = count.next_power_of_two() / BITS_IN_BYTE;
         if length >= MINIMUM_SIZE {
-            length as usize / BYTES_IN_USIZE as usize
+            length
         } else {
-            (MINIMUM_SIZE / BYTES_IN_USIZE) as usize
+            MINIMUM_SIZE
         }
     }
 
@@ -36,8 +41,8 @@ impl<T: AsBitmap> Bitmap<T> {
         if index >= self.count {
             return Err(Error::OutOfBounds);
         }
-        let row = index / BYTES_IN_USIZE;
-        let col = index % BYTES_IN_USIZE;
+        let row = index / BITS_IN_USIZE;
+        let col = index % BITS_IN_USIZE;
         if value {
             let mask = 1usize << col;
             self.bitfield[row as usize] |= mask;
@@ -53,8 +58,8 @@ impl<T: AsBitmap> Bitmap<T> {
         if index >= self.count {
             return Err(Error::OutOfBounds);
         }
-        let row = index / BYTES_IN_USIZE;
-        let col = index % BYTES_IN_USIZE;
+        let row = index / BITS_IN_USIZE;
+        let col = index % BITS_IN_USIZE;
         let mask = 1usize << col;
         Ok((self.bitfield[row as usize] & mask) != 0)
     }
@@ -75,7 +80,7 @@ impl<T: AsBitmap> Bitmap<T> {
 
     /// Load bitfield from block device
     fn load_content<D: Read + Seek>(&mut self, block_device: &mut D) -> Result<(), Error> {
-        let buffer_size = Bitmap::<Inode>::size(self.count) * BYTES_IN_USIZE as usize;
+        let buffer_size = Bitmap::<Inode>::size_in_bytes(self.count) as usize;
         let mut buffer = vec![0u8; buffer_size];
         block_device.read_exact(&mut buffer)?;
         for index in 0..buffer_size {
@@ -94,7 +99,7 @@ impl<T: AsBitmap> Bitmap<T> {
 
     /// Flush bitfield to block device
     fn flush_content<D: Write + Seek>(&self, block_device: &mut D) -> Result<(), Error> {
-        let buffer_size = Bitmap::<Inode>::size(self.count) * BYTES_IN_USIZE as usize;
+        let buffer_size = Bitmap::<Inode>::size_in_bytes(self.count) as usize;
         let mut buffer = vec![0u8; buffer_size];
         for index in 0..self.count {
             let row = index / BYTES_IN_USIZE;
@@ -121,7 +126,7 @@ impl<T: AsBitmap> Bitmap<T> {
             }
             for bit in after_bit..(BYTES_IN_USIZE * BITS_IN_BYTE) {
                 if self.bitfield[chunk] & 1usize << bit == 0 {
-                    let index = chunk as u64 * BYTES_IN_USIZE * BITS_IN_BYTE + bit;
+                    let index = chunk as u64 * BITS_IN_USIZE + bit;
                     return Some(index);
                 }
             }
@@ -141,7 +146,8 @@ impl Bitmap<Block> {
     pub fn new(superblock: &Superblock) -> Self {
         Self::empty(
             superblock.block_count,
-            superblock.bitmap_region_start() + Bitmap::<Inode>::size(superblock.inode_count) as u64,
+            superblock.bitmap_region_start()
+                + Bitmap::<Inode>::size_in_bytes(superblock.inode_count),
         )
     }
 }
@@ -150,23 +156,23 @@ impl Bitmap<Block> {
 mod tests {
     use std::io::Cursor;
 
-    use super::Bitmap;
+    use super::{Bitmap, BITS_IN_USIZE};
     use crate::structs::{Inode, Superblock};
 
     #[test]
     fn size() {
-        assert_eq!(Bitmap::<Inode>::size(0), 128);
-        assert_eq!(Bitmap::<Inode>::size(10), 128);
-        assert_eq!(Bitmap::<Inode>::size(100), 128);
-        assert_eq!(Bitmap::<Inode>::size(200), 128);
-        assert_eq!(Bitmap::<Inode>::size(1024), 128);
-        assert_eq!(Bitmap::<Inode>::size(1100), 256);
-        assert_eq!(Bitmap::<Inode>::size(3000), 512);
+        assert_eq!(Bitmap::<Inode>::size_in_bytes(0), 1024);
+        assert_eq!(Bitmap::<Inode>::size_in_bytes(10), 1024);
+        assert_eq!(Bitmap::<Inode>::size_in_bytes(200), 1024);
+        assert_eq!(Bitmap::<Inode>::size_in_bytes(1024), 1024);
+        assert_eq!(Bitmap::<Inode>::size_in_bytes(8192), 1024);
+        assert_eq!(Bitmap::<Inode>::size_in_bytes(8200), 2048);
+        assert_eq!(Bitmap::<Inode>::size_in_bytes(100_000), 16384);
     }
 
     #[test]
     fn empty() {
-        let superblock = Superblock::new(10_000, 512);
+        let superblock = Superblock::new(100_000, 512);
         let bitmap = Bitmap::<Inode>::new(&superblock);
         assert_eq!(bitmap.bitfield.len(), 128);
         bitmap
@@ -184,9 +190,15 @@ mod tests {
         assert!(bitmap.set(10000, true).is_ok());
         assert!(bitmap.set(30000, true).is_err());
         assert_eq!(bitmap.get(10).unwrap(), false);
+        assert_eq!(bitmap.get(99).unwrap(), false);
         assert_eq!(bitmap.get(100).unwrap(), true);
+        assert_eq!(bitmap.get(101).unwrap(), false);
+        assert_eq!(bitmap.get(999).unwrap(), false);
         assert_eq!(bitmap.get(1000).unwrap(), true);
+        assert_eq!(bitmap.get(1001).unwrap(), false);
+        assert_eq!(bitmap.get(9999).unwrap(), false);
         assert_eq!(bitmap.get(10000).unwrap(), true);
+        assert_eq!(bitmap.get(10001).unwrap(), false);
         assert_eq!(bitmap.get(20000).unwrap(), false);
         assert!(bitmap.get(30000).is_err());
     }
@@ -198,5 +210,16 @@ mod tests {
         let mut dev = Cursor::new(vec![0u8; superblock.inode_region_start() as usize]);
         assert!(bitmap.load(&mut dev).is_ok());
         assert!(bitmap.flush(&mut dev).is_ok());
+    }
+
+    #[test]
+    fn next_free() {
+        let superblock = Superblock::new(10_000_000, 512);
+        let mut bitmap = Bitmap::<Inode>::new(&superblock);
+        for index in 0..BITS_IN_USIZE * 2 {
+            assert_eq!(bitmap.get(index).unwrap(), false);
+            assert_eq!(bitmap.next_free(index), Some(index));
+            assert!(bitmap.set(index, true).is_ok());
+        }
     }
 }
