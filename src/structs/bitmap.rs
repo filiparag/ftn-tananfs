@@ -89,8 +89,8 @@ impl<T: AsBitmap> Bitmap<T> {
             let chunk = buffer[row];
             let mask = 1u8 << col;
             let bit = (chunk & mask) >> col & 1u8;
-            let row = index / BYTES_IN_USIZE as usize;
-            let col = index % BYTES_IN_USIZE as usize;
+            let row = index / BITS_IN_USIZE as usize;
+            let col = index % BITS_IN_USIZE as usize;
             let mask = (bit as usize) << col;
             self.bitfield[row] |= mask;
         }
@@ -102,8 +102,8 @@ impl<T: AsBitmap> Bitmap<T> {
         let buffer_size = Bitmap::<Inode>::size_in_bytes(self.count) as usize;
         let mut buffer = vec![0u8; buffer_size];
         for index in 0..self.count {
-            let row = index / BYTES_IN_USIZE;
-            let col = index % BYTES_IN_USIZE;
+            let row = index / BITS_IN_USIZE;
+            let col = index % BITS_IN_USIZE;
             let chunk = self.bitfield[row as usize];
             let mask = 1usize << col;
             let bit = (chunk & mask) >> col & 1usize;
