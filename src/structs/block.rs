@@ -1,6 +1,8 @@
-use super::*;
-
+use bytemuck::Pod;
 use std::io::SeekFrom;
+
+use super::*;
+use crate::{filesystem::Filesystem, Error};
 
 const LENGTH_AS_BYTES: usize = 2;
 const COUNT_AS_BYTES: usize = 4;
@@ -8,6 +10,39 @@ const COUNT_AS_BYTES: usize = 4;
 impl AsBitmap for Block {}
 
 impl Block {
+    pub fn new(fs: &mut Filesystem) -> Result<Self, Error> {
+        let index = fs.acquire_block()?;
+        Ok(Self {
+            index,
+            data: vec![0; fs.superblock.block_size as usize],
+        })
+    }
+
+    /// Serialize any data to bytes and return ones exceeding Block's capacity
+    pub fn write_any<T: Pod>(&mut self, position: usize, data: T) -> Result<Vec<u8>, Error> {
+        let data_raw = bytemuck::bytes_of(&data);
+        if position + data_raw.len() < self.data.len() {
+            self.data[position..position + data_raw.len()].copy_from_slice(&data_raw);
+            Ok(vec![])
+        } else {
+            let end = position + data_raw.len() - self.data.len();
+            self.data[position..].copy_from_slice(&data_raw[..end]);
+            Ok(data_raw[end..].to_vec())
+        }
+    }
+
+    /// Write bytes to bytes and return ones exceeding Block's capacity
+    pub fn write_bytes<'a>(&mut self, position: usize, data: &'a [u8]) -> Result<&'a [u8], Error> {
+        if position + data.len() < self.data.len() {
+            self.data[position..position + data.len()].copy_from_slice(&data);
+            Ok(&[])
+        } else {
+            let end = position + data.len() - self.data.len();
+            self.data[position..].copy_from_slice(&data[..end]);
+            Ok(&data[end..])
+        }
+    }
+
     // fn read_string(&self, start: usize) -> Result<&str, Error> {
     //     let length = u16::from_le_bytes((&self.data[start..start + LENGTH_AS_BYTES]).try_into()?);
     //     let name_raw =

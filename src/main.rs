@@ -2,6 +2,7 @@
 
 use error::Error;
 mod error;
+mod filesystem;
 mod structs;
 
 

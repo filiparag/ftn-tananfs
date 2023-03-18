@@ -9,19 +9,21 @@ use crate::Error;
 
 pub trait BlockDevice: Read + Write + Seek + Debug {}
 
+impl BlockDevice for std::fs::File {}
+
 #[derive(Debug, Default)]
-struct Cache {
+pub struct Cache {
     inodes: BTreeMap<u64, Inode>,
     blocks: BTreeMap<u64, Block>,
 }
 
 #[derive(Debug)]
 pub struct Filesystem {
-    superblock: Superblock,
-    inodes: Bitmap<Inode>,
-    blocks: Bitmap<Block>,
-    device: Box<dyn BlockDevice>,
-    cache: Cache,
+    pub(crate) superblock: Superblock,
+    pub(crate) inodes: Bitmap<Inode>,
+    pub(crate) blocks: Bitmap<Block>,
+    pub(crate) device: Box<dyn BlockDevice>,
+    pub(crate) cache: Cache,
 }
 
 impl Filesystem {
