@@ -15,6 +15,9 @@ impl RawByteFile {
     pub fn new(fs: &Arc<Mutex<Filesystem>>) -> Result<Self, Error> {
         let mut fs_handle = fs.lock()?;
         let initial_block = fs_handle.acquire_block()?;
+        let mut block = fs_handle.load_block(initial_block)?;
+        set_next_block(&mut block, NULL_BLOCK);
+        fs_handle.flush_block(&block)?;
         let cursor = BlockCursor::new(&fs_handle, (BYTES_IN_U64 as u32, 0));
         Ok(Self {
             initial_block,
@@ -28,23 +31,23 @@ impl RawByteFile {
     /// Create zero-initialized file with specified capacity
     pub fn with_capacity(fs: &Arc<Mutex<Filesystem>>, capacity: u64) -> Result<Self, Error> {
         let mut fs_handle = fs.lock().unwrap();
-        let bytes_per_block = fs_handle.superblock.block_size as usize - BYTES_IN_U64;
-        let empty_block = vec![0u8; fs_handle.superblock.block_size as usize];
         let initial_block = fs_handle.acquire_block()?;
         let cursor = BlockCursor::new(&fs_handle, (BYTES_IN_U64 as u32, 0));
         let mut total_allocated_bytes =
             fs_handle.superblock.block_size as u64 - BYTES_IN_U64 as u64;
         let mut block_count = 1;
         let mut current_block = fs_handle.load_block(initial_block)?;
-        current_block.data.copy_from_slice(&empty_block);
+        empty_block_data(&mut current_block, 0);
         while total_allocated_bytes < capacity {
             let next_block = fs_handle.acquire_block()?;
-            current_block.data[0..BYTES_IN_U64].copy_from_slice(&next_block.to_le_bytes());
+            set_next_block(&mut current_block, next_block);
             fs_handle.flush_block(&current_block)?;
             current_block = fs_handle.load_block(next_block)?;
-            total_allocated_bytes += bytes_per_block as u64;
+            total_allocated_bytes += bytes_per_block(fs_handle.superblock.block_size);
             block_count += 1;
         }
+        set_next_block(&mut current_block, NULL_BLOCK);
+        fs_handle.flush_block(&current_block)?;
         Ok(Self {
             initial_block,
             block_count,
@@ -62,7 +65,7 @@ impl RawByteFile {
             return Ok(current_block);
         }
         for current_index in 1..position {
-            let next_block = u64_from_bytes(&current_block.data[0..BYTES_IN_U64]);
+            let next_block = get_next_block(&current_block);
             if next_block == NULL_BLOCK && current_index + 1 < position {
                 return Err(Error::OutOfBounds);
             }
@@ -79,7 +82,7 @@ impl RawByteFile {
         }
         let mut current_block = self.get_nth_block(self.cursor.block())?;
         let mut fs = self.filesystem.lock().unwrap();
-        let bytes_per_block = fs.superblock.block_size as usize - BYTES_IN_U64;
+        let bytes_per_block = bytes_per_block(fs.superblock.block_size) as usize;
         if buffer.len() < bytes_per_block - self.cursor.padded_byte() {
             buffer.copy_from_slice(
                 &current_block.data[self.cursor.byte()..self.cursor.byte() + buffer.len()],
@@ -89,7 +92,7 @@ impl RawByteFile {
         }
         let mut total_read_bytes = 0;
         while total_read_bytes < buffer.len() {
-            let next_block = u64_from_bytes(&current_block.data[0..BYTES_IN_U64]);
+            let next_block = get_next_block(&current_block);
             let read_bytes = usize::min(
                 buffer.len() - total_read_bytes,
                 bytes_per_block - self.cursor.padded_byte(),
@@ -110,7 +113,7 @@ impl RawByteFile {
     pub fn write(&mut self, buffer: &[u8]) -> Result<(), Error> {
         let mut current_block = self.get_nth_block(self.cursor.block())?;
         let mut fs = self.filesystem.lock().unwrap();
-        let bytes_per_block = fs.superblock.block_size as usize - BYTES_IN_U64;
+        let bytes_per_block = bytes_per_block(fs.superblock.block_size) as usize;
         if buffer.len() < bytes_per_block - self.cursor.padded_byte() {
             current_block.data[self.cursor.byte()..self.cursor.byte() + buffer.len()]
                 .copy_from_slice(&buffer);
@@ -122,7 +125,7 @@ impl RawByteFile {
         }
         let mut total_written_bytes = 0;
         while total_written_bytes < buffer.len() {
-            let next_block = u64_from_bytes(&current_block.data[0..BYTES_IN_U64]);
+            let next_block = get_next_block(&current_block);
             let write_bytes = usize::min(
                 buffer.len() - total_written_bytes,
                 bytes_per_block - self.cursor.padded_byte(),
@@ -151,17 +154,25 @@ impl RawByteFile {
             return Err(Error::InsufficientBytes);
         }
         let mut last_block = self.get_nth_block(self.block_count - 1)?;
+        let previous_cursor = self.cursor.position();
         let mut fs = self.filesystem.lock().unwrap();
-        let bytes_per_block = fs.superblock.block_size as usize - BYTES_IN_U64;
-        while new_capacity > self.size {
-            let next_block = Block::new(&mut fs)?;
-            last_block.data[0..BYTES_IN_U64].copy_from_slice(&next_block.index.to_le_bytes());
-            fs.flush_block(&last_block)?;
-            last_block = next_block;
-            self.size += bytes_per_block as u64;
-            self.block_count += 1;
+        self.cursor.set(self.size);
+        empty_block_data(&mut last_block, self.cursor.byte());
+        self.cursor.set(new_capacity);
+        if self.block_count != self.cursor.block() + 1 {
+            while new_capacity > self.size {
+                let mut next_block = Block::new(&mut fs)?;
+                empty_block_data(&mut next_block, 0);
+                set_next_block(&mut last_block, next_block.index);
+                fs.flush_block(&last_block)?;
+                last_block = next_block;
+                self.size += bytes_per_block(fs.superblock.block_size);
+                self.block_count += 1;
+            }
         }
+        fs.flush_block(&last_block)?;
         self.size = new_capacity;
+        self.cursor.set(previous_cursor);
         Ok(())
     }
 
@@ -173,25 +184,28 @@ impl RawByteFile {
             return Err(Error::OutOfBounds);
         }
         let previous_cursor = self.cursor.position();
-        self.cursor.reset();
-        self.cursor.advance(new_capacity);
-        let mut last_block = self.get_nth_block(self.cursor.block())?;
-        let mut fs = self.filesystem.lock().unwrap();
-        let mut current_block = fs.load_block(u64_from_bytes(&last_block.data[0..BYTES_IN_U64]))?;
-        while self.block_count > self.cursor.block() + 1 {
-            let next_block = u64_from_bytes(&current_block.data[0..BYTES_IN_U64]);
-            fs.release_block(current_block.index)?;
-            current_block = fs.load_block(next_block)?;
-            self.block_count -= 1;
+        self.cursor.set(new_capacity);
+        if !(self.block_count == 1 && self.cursor.block() == 0) {
+            let mut last_block = self.get_nth_block(self.cursor.block())?;
+            let mut fs = self.filesystem.lock().unwrap();
+            let mut current_block = fs.load_block(get_next_block(&last_block))?;
+            while self.block_count > self.cursor.block() + 1 {
+                let next_block = get_next_block(&current_block);
+                fs.release_block(current_block.index)?;
+                self.block_count -= 1;
+                if next_block == NULL_BLOCK {
+                    break;
+                }
+                current_block = fs.load_block(next_block)?;
+            }
+            set_next_block(&mut last_block, NULL_BLOCK);
+            fs.flush_block(&last_block)?;
         }
-        last_block.data[0..BYTES_IN_U64].copy_from_slice(&NULL_BLOCK.to_le_bytes());
-        fs.flush_block(&last_block)?;
         self.size = new_capacity;
         if new_capacity < previous_cursor {
             self.cursor.reset();
         } else {
-            self.cursor.reset();
-            self.cursor.advance(previous_cursor);
+            self.cursor.set(previous_cursor);
         }
         Ok(())
     }
@@ -207,12 +221,10 @@ impl Seek for RawByteFile {
                         "out of bounds",
                     ));
                 }
-                self.cursor.reset();
-                self.cursor.advance(bytes)
+                self.cursor.set(bytes)
             }
             std::io::SeekFrom::End(bytes) => {
-                self.cursor.reset();
-                self.cursor.advance(self.size);
+                self.cursor.set(self.size);
                 if bytes > 0 {
                     if self.cursor.position() + bytes as u64 >= self.size {
                         return Err(std::io::Error::new(

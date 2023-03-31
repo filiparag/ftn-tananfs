@@ -67,6 +67,11 @@ impl BlockCursor {
         self.current()
     }
 
+    pub fn set(&mut self, bytes: u64) -> u64 {
+        self.reset();
+        self.advance(bytes)
+    }
+
     pub fn reset(&mut self) {
         self.current_block = 0;
         self.current_byte = self.block_padding_front;
