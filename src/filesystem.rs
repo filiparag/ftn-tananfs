@@ -74,6 +74,9 @@ impl Filesystem {
     /// Get index of first empty inode
     pub(crate) fn acquire_inode(&mut self) -> Result<u64, Error> {
         if let Some(index) = self.inodes.next_free(0) {
+            if index >= self.superblock.inode_count {
+                return Err(Error::OutOfMemory);
+            }
             self.superblock.inodes_free -= 1;
             self.inodes.set(index, true)?;
             Ok(index)
@@ -96,6 +99,9 @@ impl Filesystem {
     /// Get index of first empty block
     pub(crate) fn acquire_block(&mut self) -> Result<u64, Error> {
         if let Some(index) = self.blocks.next_free(0) {
+            if index >= self.superblock.block_count {
+                return Err(Error::OutOfMemory);
+            }
             self.superblock.blocks_free -= 1;
             self.blocks.set(index, true)?;
             Ok(index)
@@ -113,6 +119,32 @@ impl Filesystem {
         } else {
             Err(Error::DoubleRelease)
         }
+    }
+
+    /// Load inode with index
+    pub(crate) fn load_inode(&mut self, index: u64) -> Result<Inode, Error> {
+        if !self.inodes.get(index)? {
+            return Err(Error::OutOfBounds);
+        }
+        Inode::load(&mut self.device, &self.superblock, index)
+    }
+
+    /// Load block with index
+    pub(crate) fn load_block(&mut self, index: u64) -> Result<Block, Error> {
+        if !self.blocks.get(index)? {
+            return Err(Error::OutOfBounds);
+        }
+        Block::load(&mut self.device, &self.superblock, index)
+    }
+
+    /// Flush inode
+    pub(crate) fn flush_inode(&mut self, inode: &Inode) -> Result<(), Error> {
+        inode.flush(&mut self.device, &self.superblock)
+    }
+
+    /// Flush block
+    pub(crate) fn flush_block(&mut self, block: &Block) -> Result<(), Error> {
+        block.flush(&mut self.device, &self.superblock)
     }
 }
 
