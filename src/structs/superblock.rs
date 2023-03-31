@@ -51,11 +51,11 @@ impl Superblock {
         let boot_sector = block_size;
         let superblock = std::mem::size_of::<Self>() as u64;
         let inode = std::mem::size_of::<Inode>() as u64;
-        let after_superblock = capacity - boot_sector as u64 - superblock;
+        let after_superblock = capacity - boot_sector - superblock;
         let max_inodes = after_superblock / DATA_PER_INODE;
         let max_blocks = (after_superblock - max_inodes * inode) / block_size;
-        let bitmaps = (Bitmap::<Inode>::size_in_bytes(max_inodes)
-            + Bitmap::<Block>::size_in_bytes(max_blocks)) as u64;
+        let bitmaps =
+            Bitmap::<Inode>::size_in_bytes(max_inodes) + Bitmap::<Block>::size_in_bytes(max_blocks);
         let align = |byte| Self::align_to_block_start(byte, block_size as u32);
         let before_blocks = align(boot_sector + superblock + bitmaps + max_inodes * inode);
         debug_assert!(capacity > before_blocks);

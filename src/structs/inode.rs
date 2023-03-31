@@ -16,7 +16,7 @@ impl Inode {
             mtime: UNIX_EPOCH + Duration::from_secs(self.mtime),
             ctime: UNIX_EPOCH + Duration::from_secs(self.ctime),
             crtime: UNIX_EPOCH + Duration::from_secs(self.ctime),
-            kind: FileType::BlockDevice,
+            kind: self.r#type,
             perm: self.mode,
             nlink: 0, // unimplemented
             uid: self.uid,

@@ -11,6 +11,7 @@ fuser = { version = "0.12.0", features = ["abi-7-31"] }
 env_logger = "0.10.0"
 libc = "0.2.139"
 log = "0.4.17"
+bytemuck = "1.13.1"
 
 [profile.release]
 strip = true

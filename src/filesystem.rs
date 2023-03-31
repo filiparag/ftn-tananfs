@@ -33,7 +33,7 @@ impl Filesystem {
             superblock,
             inodes: Bitmap::<Inode>::new(&superblock),
             blocks: Bitmap::<Block>::new(&superblock),
-            device: device,
+            device,
             cache: Cache::default(),
         }
     }
@@ -59,10 +59,10 @@ impl Filesystem {
 
     /// Flush filesystem changes to its block device
     pub(crate) fn flush(&mut self) -> Result<(), Error> {
-        for (_, block) in &self.cache.blocks {
+        for block in self.cache.blocks.values() {
             block.flush(&mut self.device, &self.superblock)?;
         }
-        for (_, inode) in &self.cache.inodes {
+        for inode in self.cache.inodes.values() {
             inode.flush(&mut self.device, &self.superblock)?;
         }
         self.superblock.flush(&mut self.device)?;

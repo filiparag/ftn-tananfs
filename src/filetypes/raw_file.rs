@@ -71,13 +71,13 @@ impl RawByteFile {
             }
             current_block = fs.load_block(next_block)?;
         }
-        Ok(fs.load_block(current_block.index)?)
+        fs.load_block(current_block.index)
     }
 
     /// Read contents of the file into an [u8] buffer  
     /// Use [seek](Self::seek) to set starting position and adjust buffer's length for end position
     pub fn read(&mut self, buffer: &mut [u8]) -> Result<(), Error> {
-        if buffer.len() as u64 > self.size as u64 - self.cursor.position() {
+        if buffer.len() as u64 > self.size - self.cursor.position() {
             return Err(Error::OutOfBounds);
         }
         let mut current_block = self.get_nth_block(self.cursor.block())?;
@@ -104,7 +104,7 @@ impl RawByteFile {
             self.cursor.advance(read_bytes as u64);
             current_block = fs.load_block(next_block)?;
         }
-        return Ok(());
+        Ok(())
     }
 
     /// Write contents of an [u8] buffer into the file  
@@ -116,7 +116,7 @@ impl RawByteFile {
         let bytes_per_block = bytes_per_block(fs.superblock.block_size) as usize;
         if buffer.len() < bytes_per_block - self.cursor.padded_byte() {
             current_block.data[self.cursor.byte()..self.cursor.byte() + buffer.len()]
-                .copy_from_slice(&buffer);
+                .copy_from_slice(buffer);
             self.cursor.advance(buffer.len() as u64);
             if self.cursor.position() > self.size {
                 self.size = self.cursor.position();
@@ -144,7 +144,7 @@ impl RawByteFile {
         if self.cursor.position() > self.size {
             self.size = self.cursor.position();
         }
-        return Ok(());
+        Ok(())
     }
 
     /// Extend the file to a new capacity with trailing zeros  
@@ -213,6 +213,7 @@ impl RawByteFile {
 
 impl Seek for RawByteFile {
     fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        #[allow(clippy::comparison_chain)]
         Ok(match pos {
             std::io::SeekFrom::Start(bytes) => {
                 if bytes > self.size {
