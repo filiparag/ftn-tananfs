@@ -6,6 +6,8 @@ pub enum Error {
     DoubleRelease,
     OutOfBounds,
     OutOfMemory,
+    InsufficientBytes,
+    ThreadSync,
     Io(std::io::Error),
     Utf8(std::str::Utf8Error),
     SliceIndexing(std::array::TryFromSliceError),
@@ -18,6 +20,8 @@ impl Display for Error {
             Self::DoubleRelease => write!(f, "double release"),
             Self::OutOfBounds => write!(f, "out of bounds"),
             Self::OutOfMemory => write!(f, "out of memory"),
+            Self::InsufficientBytes => write!(f, "insufficient bytes"),
+            Self::ThreadSync => write!(f, "thread synchronization"),
             Self::Io(e) => write!(f, "{e}"),
             Self::Utf8(e) => write!(f, "{e}"),
             Self::SliceIndexing(e) => write!(f, "{e}"),
@@ -42,5 +46,17 @@ impl From<std::str::Utf8Error> for Error {
 impl From<std::array::TryFromSliceError> for Error {
     fn from(value: std::array::TryFromSliceError) -> Self {
         Self::SliceIndexing(value)
+    }
+}
+
+impl<T> From<std::sync::LockResult<T>> for Error {
+    fn from(_: std::sync::LockResult<T>) -> Self {
+        Self::ThreadSync
+    }
+}
+
+impl<T> From<std::sync::PoisonError<T>> for Error {
+    fn from(_: std::sync::PoisonError<T>) -> Self {
+        Self::ThreadSync
     }
 }
