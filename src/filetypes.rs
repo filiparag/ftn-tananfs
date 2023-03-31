@@ -1,20 +1,33 @@
 mod block_cursor;
-mod directory;
-use crate::{
-    filesystem::Filesystem,
-    structs::{Block, Inode},
-    Error,
-};
+// mod directory;
+mod helpers;
+mod raw_file;
+
+use std::sync::{Arc, Mutex};
+
+use crate::{filesystem::Filesystem, structs::Inode, Error};
+
+const BYTES_IN_U64: usize = 8;
+const BYTES_IN_U16: usize = 2;
 
 pub trait File: Sized {
     fn new(fs: &mut Filesystem, parent: u64) -> Result<Self, Error>;
+}
+
+#[derive(Debug, Clone)]
+pub struct RawByteFile {
+    pub(crate) initial_block: u64,
+    pub(crate) block_count: u64,
+    pub(crate) size: u64,
+    pub(crate) cursor: BlockCursor,
+    pub(crate) filesystem: Arc<Mutex<Filesystem>>,
 }
 
 
 #[derive(Debug, Clone)]
 pub struct Directory {
     pub(crate) inode: Inode,
-    pub(crate) blocks: Vec<Block>,
+    pub(crate) blocks: Vec<u64>,
     pub(crate) name: String,
     pub(crate) children: Vec<DirectoryChild>,
 }
@@ -24,6 +37,6 @@ pub struct BlockCursor {
     pub(crate) block_size: usize,
     pub(crate) block_padding_front: usize,
     pub(crate) block_padding_back: usize,
-    pub(crate) current_block: usize,
+    pub(crate) current_block: u64,
     pub(crate) current_byte: usize,
 }
