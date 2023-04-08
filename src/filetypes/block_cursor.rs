@@ -184,6 +184,12 @@ mod tests {
         cursor.advance(1234);
         assert_eq!(cursor.current_block, 3);
         assert_eq!(cursor.current_byte, 270);
+        cursor.advance(225);
+        assert_eq!(cursor.current_block, 3);
+        assert_eq!(cursor.current_byte, 495);
+        cursor.advance(2);
+        assert_eq!(cursor.current_block, 4);
+        assert_eq!(cursor.current_byte, 9);
     }
 
     #[test]

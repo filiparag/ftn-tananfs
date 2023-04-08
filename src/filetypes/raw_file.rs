@@ -30,48 +30,26 @@ impl RawByteFile {
 
     /// Create zero-initialized file with specified capacity
     pub fn with_capacity(fs: &Arc<Mutex<Filesystem>>, capacity: u64) -> Result<Self, Error> {
-        let mut fs_handle = fs.lock().unwrap();
-        let initial_block = fs_handle.acquire_block()?;
-        let cursor = BlockCursor::new(&fs_handle, (BYTES_IN_U64 as u32, 0));
-        let mut total_allocated_bytes =
-            fs_handle.superblock.block_size as u64 - BYTES_IN_U64 as u64;
-        let mut block_count = 1;
-        let mut current_block = fs_handle.load_block(initial_block)?;
-        empty_block_data(&mut current_block, 0);
-        while total_allocated_bytes < capacity {
-            let next_block = fs_handle.acquire_block()?;
-            set_next_block(&mut current_block, next_block);
-            fs_handle.flush_block(&current_block)?;
-            current_block = fs_handle.load_block(next_block)?;
-            total_allocated_bytes += bytes_per_block(fs_handle.superblock.block_size);
-            block_count += 1;
-        }
-        set_next_block(&mut current_block, NULL_BLOCK);
-        fs_handle.flush_block(&current_block)?;
-        Ok(Self {
-            initial_block,
-            block_count,
-            size: capacity,
-            cursor,
-            filesystem: fs.clone(),
-        })
+        let mut file = Self::new(fs)?;
+        file.extend(capacity)?;
+        Ok(file)
     }
 
     /// Retrieve file's n-th [Block]
-    fn get_nth_block(&self, position: u64) -> Result<Block, Error> {
+    pub fn get_nth_block(&self, position: u64) -> Result<Block, Error> {
         let mut fs = self.filesystem.lock().unwrap();
         let mut current_block = fs.load_block(self.initial_block)?;
-        if position == 0 {
-            return Ok(current_block);
-        }
-        for current_index in 1..position {
+        for current_index in 0..=position {
+            if current_index == position {
+                return Ok(current_block);
+            }
             let next_block = get_next_block(&current_block);
-            if next_block == NULL_BLOCK && current_index + 1 < position {
+            if next_block == NULL_BLOCK {
                 return Err(Error::OutOfBounds);
             }
             current_block = fs.load_block(next_block)?;
         }
-        fs.load_block(current_block.index)
+        Err(Error::OutOfBounds)
     }
 
     /// Read contents of the file into an [u8] buffer  
@@ -134,10 +112,19 @@ impl RawByteFile {
                 .copy_from_slice(&buffer[total_written_bytes..total_written_bytes + write_bytes]);
             total_written_bytes += write_bytes;
             self.cursor.advance(write_bytes as u64);
-            fs.flush_block(&current_block)?;
-            if next_block == NULL_BLOCK {
-                current_block = Block::new(&mut fs)?;
+            if total_written_bytes == buffer.len() {
+                fs.flush_block(&current_block)?;
+                break;
+            } else if next_block == NULL_BLOCK && self.cursor.block() + 1 > self.block_count {
+                let new_block = fs.acquire_block()?;
+                set_next_block(&mut current_block, new_block);
+                fs.flush_block(&current_block)?;
+                current_block = fs.load_block(new_block)?;
+                empty_block_data(&mut current_block, 0);
+                set_next_block(&mut current_block, NULL_BLOCK);
+                self.block_count += 1;
             } else {
+                fs.flush_block(&current_block)?;
                 current_block = fs.load_block(next_block)?;
             }
         }
@@ -154,21 +141,28 @@ impl RawByteFile {
             return Err(Error::InsufficientBytes);
         }
         let mut last_block = self.get_nth_block(self.block_count - 1)?;
-        let previous_cursor = self.cursor.position();
         let mut fs = self.filesystem.lock().unwrap();
+        let previous_cursor = self.cursor.position();
+        let capacity_delta = new_capacity - self.size;
+        let mut total_allocated_bytes = 0;
         self.cursor.set(self.size);
-        empty_block_data(&mut last_block, self.cursor.byte());
-        self.cursor.set(new_capacity);
-        if self.block_count != self.cursor.block() + 1 {
-            while new_capacity > self.size {
-                let mut next_block = Block::new(&mut fs)?;
-                empty_block_data(&mut next_block, 0);
-                set_next_block(&mut last_block, next_block.index);
-                fs.flush_block(&last_block)?;
-                last_block = next_block;
-                self.size += bytes_per_block(fs.superblock.block_size);
-                self.block_count += 1;
-            }
+        let written = empty_block_data(&mut last_block, self.cursor.byte()) as u64;
+        total_allocated_bytes += written;
+        self.cursor.advance(written);
+        if total_allocated_bytes == capacity_delta {
+            fs.flush_block(&last_block)?;
+            return Ok(());
+        }
+        let bytes_per_block = bytes_per_block(fs.superblock.block_size);
+        while total_allocated_bytes < capacity_delta {
+            let next_block = fs.acquire_block()?;
+            set_next_block(&mut last_block, next_block);
+            fs.flush_block(&last_block)?;
+            last_block = fs.load_block(next_block)?;
+            empty_block_data(&mut last_block, 0);
+            set_next_block(&mut last_block, NULL_BLOCK);
+            total_allocated_bytes += bytes_per_block;
+            self.block_count += 1;
         }
         fs.flush_block(&last_block)?;
         self.size = new_capacity;

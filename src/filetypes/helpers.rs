@@ -2,6 +2,8 @@ use crate::structs::{Block, NULL_BLOCK};
 
 use super::{BYTES_IN_U16, BYTES_IN_U64};
 
+const EMPTY_BYTE_DATA: u8 = 0;
+
 fn u64_from_bytes(bytes: &[u8]) -> u64 {
     let mut raw = [0; BYTES_IN_U64];
     raw.copy_from_slice(bytes);
@@ -15,14 +17,16 @@ fn u16_from_bytes(bytes: &[u8]) -> u16 {
 }
 
 fn empty_block(size: u32) -> Vec<u8> {
-    let mut empty_block = vec![0u8; size as usize];
+    let mut empty_block = vec![EMPTY_BYTE_DATA; size as usize];
     empty_block[0..BYTES_IN_U64].copy_from_slice(&NULL_BLOCK.to_le_bytes());
     empty_block
 }
 
-pub fn empty_block_data(block: &mut Block, start_offset: usize) {
+pub fn empty_block_data(block: &mut Block, start_offset: usize) -> usize {
     let block_size = block.data.len() as u32;
-    block.data[start_offset..].copy_from_slice(&empty_block(block_size)[start_offset..]);
+    let data = &empty_block(block_size)[start_offset..];
+    block.data[start_offset..].copy_from_slice(data);
+    data.len()
 }
 
 pub fn bytes_per_block(size: u32) -> u64 {
