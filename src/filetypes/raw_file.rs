@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    structs::{Block, NULL_BLOCK},
+    structs::{Block, Inode, NULL_BLOCK},
     Error, Filesystem,
 };
 
@@ -14,13 +14,13 @@ impl RawByteFile {
     /// Create an empty file with one allocated block
     pub fn new(fs: &Arc<Mutex<Filesystem>>) -> Result<Self, Error> {
         let mut fs_handle = fs.lock()?;
-        let initial_block = fs_handle.acquire_block()?;
-        let mut block = fs_handle.load_block(initial_block)?;
+        let first_block = fs_handle.acquire_block()?;
+        let mut block = fs_handle.load_block(first_block)?;
         set_next_block(&mut block, NULL_BLOCK);
         fs_handle.flush_block(&block)?;
         let cursor = BlockCursor::new(&fs_handle, (BYTES_IN_U64 as u32, 0));
         Ok(Self {
-            initial_block,
+            first_block,
             block_count: 1,
             size: 0,
             cursor,
@@ -35,10 +35,23 @@ impl RawByteFile {
         Ok(file)
     }
 
+    /// Create an empty file with one allocated block
+    pub fn load(fs: &Arc<Mutex<Filesystem>>, inode: Inode) -> Result<Self, Error> {
+        let fs_handle = fs.lock()?;
+        let cursor = BlockCursor::new(&fs_handle, (BYTES_IN_U64 as u32, 0));
+        Ok(Self {
+            first_block: inode.first_block,
+            block_count: inode.block_count,
+            size: inode.size,
+            cursor,
+            filesystem: fs.clone(),
+        })
+    }
+
     /// Retrieve file's n-th [Block]
     pub fn get_nth_block(&self, position: u64) -> Result<Block, Error> {
-        let mut fs = self.filesystem.lock().unwrap();
-        let mut current_block = fs.load_block(self.initial_block)?;
+        let mut fs = self.filesystem.lock()?;
+        let mut current_block = fs.load_block(self.first_block)?;
         for current_index in 0..=position {
             if current_index == position {
                 return Ok(current_block);
@@ -59,7 +72,7 @@ impl RawByteFile {
             return Err(Error::OutOfBounds);
         }
         let mut current_block = self.get_nth_block(self.cursor.block())?;
-        let mut fs = self.filesystem.lock().unwrap();
+        let mut fs = self.filesystem.lock()?;
         let bytes_per_block = bytes_per_block(fs.superblock.block_size) as usize;
         if buffer.len() < bytes_per_block - self.cursor.padded_byte() {
             buffer.copy_from_slice(
@@ -90,7 +103,7 @@ impl RawByteFile {
     /// Use [seek](Self::seek) to set starting position and adjust buffer's length for end position
     pub fn write(&mut self, buffer: &[u8]) -> Result<(), Error> {
         let mut current_block = self.get_nth_block(self.cursor.block())?;
-        let mut fs = self.filesystem.lock().unwrap();
+        let mut fs = self.filesystem.lock()?;
         let bytes_per_block = bytes_per_block(fs.superblock.block_size) as usize;
         if buffer.len() < bytes_per_block - self.cursor.padded_byte() {
             current_block.data[self.cursor.byte()..self.cursor.byte() + buffer.len()]
@@ -141,7 +154,7 @@ impl RawByteFile {
             return Err(Error::InsufficientBytes);
         }
         let mut last_block = self.get_nth_block(self.block_count - 1)?;
-        let mut fs = self.filesystem.lock().unwrap();
+        let mut fs = self.filesystem.lock()?;
         let previous_cursor = self.cursor.position();
         let capacity_delta = new_capacity - self.size;
         let mut total_allocated_bytes = 0;
@@ -181,7 +194,7 @@ impl RawByteFile {
         self.cursor.set(new_capacity);
         if !(self.block_count == 1 && self.cursor.block() == 0) {
             let mut last_block = self.get_nth_block(self.cursor.block())?;
-            let mut fs = self.filesystem.lock().unwrap();
+            let mut fs = self.filesystem.lock()?;
             let mut current_block = fs.load_block(get_next_block(&last_block))?;
             while self.block_count > self.cursor.block() + 1 {
                 let next_block = get_next_block(&current_block);

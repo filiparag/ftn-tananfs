@@ -1,5 +1,6 @@
 mod block_cursor;
-// mod directory;
+mod directory;
+mod directory_child;
 mod helpers;
 mod raw_file;
 
@@ -16,7 +17,7 @@ pub trait File: Sized {
 
 #[derive(Debug, Clone)]
 pub struct RawByteFile {
-    pub(crate) initial_block: u64,
+    pub(crate) first_block: u64,
     pub(crate) block_count: u64,
     pub(crate) size: u64,
     pub(crate) cursor: BlockCursor,
@@ -25,11 +26,18 @@ pub struct RawByteFile {
 
 
 #[derive(Debug, Clone)]
+pub struct DirectoryChild {
+    pub(crate) inode: u64,
+    pub(crate) name: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct Directory {
     pub(crate) inode: Inode,
-    pub(crate) blocks: Vec<u64>,
+    pub(crate) file: RawByteFile,
     pub(crate) name: String,
     pub(crate) children: Vec<DirectoryChild>,
+    pub(crate) filesystem: Arc<Mutex<Filesystem>>,
 }
 
 #[derive(Debug, Clone)]

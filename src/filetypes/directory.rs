@@ -1,23 +1,22 @@
+use super::{helpers::*, RawByteFile};
 use super::{Directory, DirectoryChild};
-use crate::{
-    filesystem::Filesystem,
-    filetypes::BlockCursor,
-    structs::{Block, Inode, PermanentIndexed, NULL_BLOCK},
-    Error,
-};
-use fuser::FileType;
-use std::time::SystemTime;
+use crate::structs::{Inode, NULL_BLOCK};
+use crate::{Error, Filesystem};
 
-const BYTES_IN_U64: usize = 8;
-const BYTES_IN_U16: usize = 2;
+use fuser::FileType;
+use std::sync::{Arc, Mutex};
 
 impl Directory {
-    pub fn new(fs: &mut Filesystem, parent: u64, name: &str, mode: u32) -> Result<Self, Error> {
-        let now = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map_or(0, |d| d.as_secs());
-        let inode = fs.acquire_inode()?;
+    pub fn new(
+        fs: &Arc<Mutex<Filesystem>>,
+        parent: u64,
+        name: &str,
+        mode: u32,
+    ) -> Result<Self, Error> {
+        let now = timestamp_now();
+        let inode = fs.lock()?.acquire_inode()?;
         let children_count = 0u64;
+        let file = RawByteFile::new(fs)?;
         Ok(Self {
             inode: Inode {
                 index: inode,
@@ -30,117 +29,66 @@ impl Directory {
                 ctime: now,
                 mtime: now,
                 dtime: u64::MAX,
-                block_count: 0,
-                blocks: [parent, children_count, 0, 0, 0, 0],
+                block_count: 1,
+                metadata: [
+                    parent,
+                    children_count,
+                    name.as_bytes().len() as u64,
+                    NULL_BLOCK,
+                    NULL_BLOCK,
+                    NULL_BLOCK,
+                ],
                 __padding_1: Default::default(),
-                blocks_extra: NULL_BLOCK,
+                first_block: file.first_block,
             },
-            blocks: Vec::new(),
+            file,
             name: name.to_owned(),
             children: Vec::new(),
+            filesystem: fs.clone(),
         })
     }
 
-    pub fn flush(&mut self, fs: &mut Filesystem) -> Result<(), Error> {
-        // Calculate new size in blocks
-        let mut required_bytes = 0;
-        required_bytes += BYTES_IN_U16 + self.name.bytes().count();
-        for (_, child) in self.children.iter() {
-            required_bytes += BYTES_IN_U64 + BYTES_IN_U16 + child.bytes().count();
+    pub fn flush(&mut self) -> Result<(), Error> {
+        self.file.cursor.reset();
+        self.file.write(self.name.as_bytes())?;
+        for child in self.children.iter() {
+            child.flush(&mut self.file)?;
         }
-        dbg![required_bytes];
-        // Allocate required blocks
-        loop {
-            if required_bytes < self.blocks.len() * fs.superblock.block_size as usize {
-                break;
-            }
-            self.blocks.push(Block::new(fs)?);
-            required_bytes = if required_bytes < fs.superblock.block_size as usize {
-                0
-            } else {
-                required_bytes - fs.superblock.block_size as usize
-            };
-        }
-        self.inode.block_count = self.blocks.len() as u64;
-        self.inode.blocks_extra = self.blocks[0].index;
-        // Link blocks
-        for i in 0..self.blocks.len() {
-            if i < self.blocks.len() - 1 {
-                let next = self.blocks[i + 1].index;
-                let remainder = self.blocks[i].write_any(0, next)?;
-                assert_eq!(remainder.len(), 0)
-            }
-        }
-        let mut cursor = BlockCursor::new(fs, (BYTES_IN_U64 as u32, 0));
-        // Write directory name to first block
-        self.blocks[cursor.block()].write_any(cursor.byte(), self.name.bytes().count() as u16)?;
-        cursor.advance(BYTES_IN_U16);
-        // TODO: spillover to next block
-        self.blocks[cursor.block()].write_bytes(cursor.byte(), self.name.as_bytes())?;
-        cursor.advance(self.name.bytes().count());
-        // Write children
-        for (inode, name) in self.children.iter() {
-            self.blocks[cursor.block()].write_any(cursor.byte(), *inode)?;
-            cursor.advance(BYTES_IN_U64);
-            self.blocks[cursor.block()].write_any(cursor.byte(), name.bytes().count() as u16)?;
-            cursor.advance(BYTES_IN_U16);
-            // TODO: spillover to next block
-            self.blocks[cursor.block()].write_bytes(cursor.byte(), name.as_bytes())?;
-            cursor.advance(name.bytes().count());
-        }
-        self.inode.flush(&mut fs.device, &fs.superblock)?;
-        for block in self.blocks.iter_mut() {
-            block.flush(&mut fs.device, &fs.superblock)?;
-        }
+        self.inode.mtime = timestamp_now();
+        self.inode.block_count = self.file.block_count;
+        self.inode.size = self.file.cursor.position();
+        self.inode.metadata[1] = self.children.len() as u64;
+        self.inode.metadata[2] = self.name.as_bytes().len() as u64;
+        self.filesystem.lock()?.flush_inode(&self.inode)?;
         Ok(())
     }
 
-    pub fn load(fs: &mut Filesystem, index: u64) -> Result<Self, Error> {
-        let inode = Inode::load(&mut fs.device, &fs.superblock, index)?;
-        // Load linked blocks
-        let mut blocks = Vec::<Block>::with_capacity(inode.block_count as usize);
-        let mut block_index = inode.blocks_extra;
-        for _ in 0..inode.block_count {
-            let b = Block::load(&mut fs.device, &fs.superblock, block_index)?;
-            block_index = u64::from_le_bytes(b.data[0..BYTES_IN_U64].try_into()?);
-            blocks.push(b);
-        }
-        let mut cursor = BlockCursor::new(fs, (BYTES_IN_U64 as u32, 0));
-        // Load name
-        let name_len = u16::from_le_bytes(
-            blocks[cursor.block()].data[cursor.byte()..cursor.byte() + BYTES_IN_U16].try_into()?,
-        );
-        cursor.advance(BYTES_IN_U16);
-        let name = std::str::from_utf8(
-            &blocks[cursor.block()].data[cursor.byte()..cursor.byte() + name_len as usize],
-        )?
-        .to_owned();
-        cursor.advance(name_len as usize);
-        // Load children
-        let mut children = Vec::<DirectoryChild>::with_capacity(inode.blocks[1] as usize);
-        for _ in 0..children.capacity() {
-            let inode = u64::from_le_bytes(
-                blocks[cursor.block()].data[cursor.byte()..cursor.byte() + BYTES_IN_U64]
-                    .try_into()?,
-            );
-            cursor.advance(BYTES_IN_U64);
-            let name_len = u16::from_le_bytes(
-                blocks[cursor.block()].data[cursor.byte()..cursor.byte() + BYTES_IN_U16]
-                    .try_into()?,
-            );
-            cursor.advance(BYTES_IN_U16);
-            let name = std::str::from_utf8(
-                &blocks[cursor.block()].data[cursor.byte()..cursor.byte() + name_len as usize],
-            )?
-            .to_owned();
-            cursor.advance(name_len as usize);
-            children.push((inode, name));
+    pub fn load(fs: &Arc<Mutex<Filesystem>>, index: u64) -> Result<Self, Error> {
+        let mut fs_handle = fs.lock()?;
+        let inode = fs_handle.load_inode(index)?;
+        let children_count = inode.metadata[1];
+        let name_len = inode.metadata[2] as usize;
+        drop(fs_handle);
+        let mut file = RawByteFile::load(fs, inode)?;
+        let name = read_string(&mut file, name_len)?;
+        let mut children = Vec::<DirectoryChild>::with_capacity(children_count as usize);
+        for _ in 0..children_count {
+            children.push(DirectoryChild::read(&mut file)?);
         }
         Ok(Self {
             inode,
-            blocks,
-            children,
+            file,
             name,
+            children,
+            filesystem: fs.clone(),
         })
+    }
+
+    pub fn remove(mut self) -> Result<(), Error> {
+        self.file.shrink(0)?;
+        let mut fs_handle = self.filesystem.lock()?;
+        fs_handle.release_block(self.inode.first_block)?;
+        fs_handle.release_inode(self.inode.index)?;
+        Ok(())
     }
 }

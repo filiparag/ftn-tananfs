@@ -77,9 +77,9 @@ impl Default for Inode {
             mtime: 0,
             dtime: 0,
             block_count: 0,
-            blocks: [0; BLOCKS_IN_INODE],
+            metadata: [0; METADATA_IN_INODE],
             __padding_1: Default::default(),
-            blocks_extra: 0,
+            first_block: 0,
         }
     }
 }
