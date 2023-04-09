@@ -6,6 +6,10 @@ authors = ["Filip Parag <filip@parag.rs>"]
 license = "MIT"
 include = ["/src"]
 
+[[bin]]
+name = "debugger"
+path = "src/debugger.rs"
+
 [dependencies]
 fuser = { version = "0.12.0", features = ["abi-7-31"] }
 env_logger = "0.10.0"

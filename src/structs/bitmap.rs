@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
 
@@ -149,6 +150,23 @@ impl Bitmap<Block> {
             superblock.bitmap_region_start()
                 + Bitmap::<Inode>::size_in_bytes(superblock.inode_count),
         )
+    }
+}
+
+impl<T: AsBitmap> Display for Bitmap<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Bitmap {{",)?;
+        writeln!(f, "    count: {}", self.count as u64)?;
+        writeln!(f, "    position: {}", self.position as u64)?;
+        writeln!(f, "    bitfield: [")?;
+        for bit in 0..self.count {
+            if self.get(bit).unwrap() {
+                writeln!(f, "        {bit}")?;
+            }
+        }
+        writeln!(f, "    ]")?;
+        write!(f, "}}")?;
+        Ok(())
     }
 }
 

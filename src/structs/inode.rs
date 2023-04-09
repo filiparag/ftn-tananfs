@@ -2,6 +2,7 @@ use super::*;
 
 use fuser::{FileAttr, FileType};
 use std::{
+    fmt::Display,
     io::{Read, Seek, SeekFrom, Write},
     time::{Duration, UNIX_EPOCH},
 };
@@ -81,6 +82,31 @@ impl Default for Inode {
             __padding_1: Default::default(),
             first_block: 0,
         }
+    }
+}
+
+impl Display for Inode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Inode {{")?;
+        writeln!(f, "    index: {}", self.index as u64)?;
+        writeln!(f, "    mode: {}", self.mode as u16)?;
+        writeln!(f, "    r#t{:?}", self.r#type)?;
+        writeln!(f, "    size: {}", self.size as u64)?;
+        writeln!(f, "    uid: {}", self.uid as u32)?;
+        writeln!(f, "    gid: {}", self.gid as u32)?;
+        writeln!(f, "    atime: {}", self.atime as u64)?;
+        writeln!(f, "    ctime: {}", self.ctime as u64)?;
+        writeln!(f, "    mtime: {}", self.mtime as u64)?;
+        writeln!(f, "    dtime: {}", self.dtime as u64)?;
+        writeln!(f, "    block_count: {}", self.block_count as u64)?;
+        writeln!(f, "    metadata: [")?;
+        for chunk in self.metadata {
+            writeln!(f, "        {chunk:0x}")?;
+        }
+        writeln!(f, "    ]")?;
+        writeln!(f, "    first_block: {}", self.first_block as u64)?;
+        write!(f, "}}")?;
+        Ok(())
     }
 }
 

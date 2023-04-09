@@ -1,4 +1,7 @@
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::{
+    fmt::Display,
+    io::{Read, Seek, SeekFrom, Write},
+};
 
 use super::*;
 use crate::Error;
@@ -114,6 +117,20 @@ impl Superblock {
         } else {
             Err(Error::OutOfBounds)
         }
+    }
+}
+
+impl Display for Superblock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Superblock {{")?;
+        writeln!(f, "    inode_count: {}", self.inode_count as u64)?;
+        writeln!(f, "    inodes_free: {},", self.inodes_free as u64)?;
+        writeln!(f, "    block_count: {},", self.block_count as u64)?;
+        writeln!(f, "    blocks_free: {},", self.blocks_free as u64)?;
+        writeln!(f, "    block_size: {},", self.block_size as u32)?;
+        writeln!(f, "    magic: {}", self.magic as u16)?;
+        write!(f, "}}")?;
+        Ok(())
     }
 }
 

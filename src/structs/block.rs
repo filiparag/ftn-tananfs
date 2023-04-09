@@ -1,5 +1,5 @@
 use bytemuck::Pod;
-use std::io::SeekFrom;
+use std::{fmt::Display, io::SeekFrom};
 
 use super::*;
 use crate::{filesystem::Filesystem, Error};
@@ -70,6 +70,38 @@ impl PermanentIndexed for Block {
         let position = superblock.block_position(self.index)?;
         block_device.seek(SeekFrom::Start(position))?;
         block_device.write_all(&self.data)?;
+        Ok(())
+    }
+}
+
+impl Display for Block {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Block {{")?;
+        writeln!(f, "    index: {}", self.index as u64)?;
+        writeln!(f, "    data: [")?;
+        write!(f, "         ")?;
+        for column in 0..16 {
+            write!(f, "{column:3}")?;
+        }
+        writeln!(f, "")?;
+        for (index, byte) in self.data.iter().enumerate() {
+            if index % 16 == 0 {
+                write!(f, "     {index:3}:")?;
+            }
+            if byte.is_ascii_alphanumeric() {
+                write!(f, "  {}", *byte as char)?;
+            } else if *byte == 0 {
+                write!(f, "  ·")?;
+            } else {
+                write!(f, " {byte:02X}")?;
+            }
+
+            if index % 16 == 15 {
+                writeln!(f, "")?;
+            }
+        }
+        writeln!(f, "    ]")?;
+        write!(f, "}}")?;
         Ok(())
     }
 }
