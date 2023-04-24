@@ -60,3 +60,19 @@ impl<T> From<std::sync::PoisonError<T>> for Error {
         Self::ThreadSync
     }
 }
+
+impl From<Error> for libc::c_int {
+    fn from(value: Error) -> Self {
+        match value {
+            Error::DoubleAcquire => 1,
+            Error::DoubleRelease => 2,
+            Error::OutOfBounds => 3,
+            Error::OutOfMemory => 4,
+            Error::InsufficientBytes => 5,
+            Error::ThreadSync => 6,
+            Error::Io(_) => 7,
+            Error::Utf8(_) => 8,
+            Error::SliceIndexing(_) => 9,
+        }
+    }
+}

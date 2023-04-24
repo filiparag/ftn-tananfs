@@ -44,7 +44,6 @@ impl Directory {
             file,
             name: name.to_owned(),
             children: Vec::new(),
-            filesystem: fs.clone(),
         })
     }
 
@@ -59,7 +58,7 @@ impl Directory {
         self.inode.size = self.file.cursor.position();
         self.inode.metadata[1] = self.children.len() as u64;
         self.inode.metadata[2] = self.name.as_bytes().len() as u64;
-        self.filesystem.lock()?.flush_inode(&self.inode)?;
+        self.file.filesystem.lock()?.flush_inode(&self.inode)?;
         Ok(())
     }
 
@@ -80,13 +79,12 @@ impl Directory {
             file,
             name,
             children,
-            filesystem: fs.clone(),
         })
     }
 
     pub fn remove(mut self) -> Result<(), Error> {
         self.file.shrink(0)?;
-        let mut fs_handle = self.filesystem.lock()?;
+        let mut fs_handle = self.file.filesystem.lock()?;
         fs_handle.release_block(self.inode.first_block)?;
         fs_handle.release_inode(self.inode.index)?;
         Ok(())

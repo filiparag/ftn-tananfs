@@ -37,7 +37,6 @@ pub struct Directory {
     pub(crate) file: RawByteFile,
     pub(crate) name: String,
     pub(crate) children: Vec<DirectoryChild>,
-    pub(crate) filesystem: Arc<Mutex<Filesystem>>,
 }
 
 #[derive(Debug, Clone)]

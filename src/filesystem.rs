@@ -3,10 +3,14 @@ use std::fmt::Debug;
 use std::io::Read;
 use std::io::Seek;
 use std::io::Write;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::MutexGuard;
 
 use crate::structs::*;
 use crate::Error;
 
+mod fuse;
 pub trait BlockDevice: Read + Write + Seek + Debug {}
 
 impl BlockDevice for std::fs::File {}
@@ -24,6 +28,21 @@ pub struct Filesystem {
     pub(crate) blocks: Bitmap<Block>,
     pub(crate) device: Box<dyn BlockDevice>,
     pub(crate) cache: Cache,
+}
+
+#[derive(Debug)]
+pub struct FuseFs {
+    pub(crate) filesystem: Arc<Mutex<Filesystem>>,
+}
+
+impl FuseFs {
+    fn fs_handle(&self) -> Result<MutexGuard<Filesystem>, Error> {
+        if let Ok(fs) = self.filesystem.lock() {
+            Ok(fs)
+        } else {
+            Err(Error::ThreadSync)
+        }
+    }
 }
 
 impl Filesystem {
