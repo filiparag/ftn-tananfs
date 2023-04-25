@@ -46,6 +46,12 @@ impl DirectoryChild {
     }
 }
 
+impl PartialEq for DirectoryChild {
+    fn eq(&self, other: &Self) -> bool {
+        self.inode == other.inode || self.name == other.name
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::DirectoryChild;

@@ -8,6 +8,8 @@ pub enum Error {
     OutOfMemory,
     InsufficientBytes,
     ThreadSync,
+    NameOrInodeDuplicate,
+    NotFound,
     Io(std::io::Error),
     Utf8(std::str::Utf8Error),
     SliceIndexing(std::array::TryFromSliceError),
@@ -15,16 +17,19 @@ pub enum Error {
 
 impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use Error::*;
         match self {
-            Self::DoubleAcquire => write!(f, "duble acquire"),
-            Self::DoubleRelease => write!(f, "double release"),
-            Self::OutOfBounds => write!(f, "out of bounds"),
-            Self::OutOfMemory => write!(f, "out of memory"),
-            Self::InsufficientBytes => write!(f, "insufficient bytes"),
-            Self::ThreadSync => write!(f, "thread synchronization"),
-            Self::Io(e) => write!(f, "{e}"),
-            Self::Utf8(e) => write!(f, "{e}"),
-            Self::SliceIndexing(e) => write!(f, "{e}"),
+            DoubleAcquire => write!(f, "duble acquire"),
+            DoubleRelease => write!(f, "double release"),
+            OutOfBounds => write!(f, "out of bounds"),
+            OutOfMemory => write!(f, "out of memory"),
+            InsufficientBytes => write!(f, "insufficient bytes"),
+            ThreadSync => write!(f, "thread synchronization"),
+            NameOrInodeDuplicate => write!(f, "name or inode duplicate"),
+            NotFound => write!(f, "not found"),
+            Io(e) => write!(f, "{e}"),
+            Utf8(e) => write!(f, "{e}"),
+            SliceIndexing(e) => write!(f, "{e}"),
         }
     }
 }
@@ -63,16 +68,20 @@ impl<T> From<std::sync::PoisonError<T>> for Error {
 
 impl From<Error> for libc::c_int {
     fn from(value: Error) -> Self {
+        use libc::*;
+        use Error::*;
         match value {
-            Error::DoubleAcquire => 1,
-            Error::DoubleRelease => 2,
-            Error::OutOfBounds => 3,
-            Error::OutOfMemory => 4,
-            Error::InsufficientBytes => 5,
-            Error::ThreadSync => 6,
-            Error::Io(_) => 7,
-            Error::Utf8(_) => 8,
-            Error::SliceIndexing(_) => 9,
+            DoubleAcquire => EIO,
+            DoubleRelease => EBADF,
+            OutOfBounds => ESPIPE,
+            OutOfMemory => ENOSPC,
+            InsufficientBytes => ENOBUFS,
+            ThreadSync => EDEADLOCK,
+            NameOrInodeDuplicate => EEXIST,
+            NotFound => ENOENT,
+            Io(_) => EIO,
+            Utf8(_) => EBADMSG,
+            SliceIndexing(_) => ENOBUFS,
         }
     }
 }
