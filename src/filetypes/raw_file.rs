@@ -35,7 +35,7 @@ impl RawByteFile {
         Ok(file)
     }
 
-    /// Create an empty file with one allocated block
+    /// Load file for given [Inode]
     pub fn load(fs: &Arc<Mutex<Filesystem>>, inode: Inode) -> Result<Self, Error> {
         let fs_handle = fs.lock()?;
         let cursor = BlockCursor::new(&fs_handle, (BYTES_IN_U64 as u32, 0));
@@ -93,6 +93,9 @@ impl RawByteFile {
             );
             total_read_bytes += read_bytes;
             self.cursor.advance(read_bytes as u64);
+            if next_block == NULL_BLOCK {
+                break;
+            }
             current_block = fs.load_block(next_block)?;
         }
         Ok(())
@@ -214,6 +217,20 @@ impl RawByteFile {
         } else {
             self.cursor.set(previous_cursor);
         }
+        Ok(())
+    }
+
+    /// Remove file for given [Inode] index
+    pub fn remove(fs: &Arc<Mutex<Filesystem>>, inode: u64) -> Result<(), Error> {
+        let inode = {
+            let mut fs_handle = fs.lock()?;
+            fs_handle.load_inode(inode)?
+        };
+        let mut file = Self::load(fs, inode)?;
+        file.shrink(0)?;
+        let mut fs_handle = fs.lock()?;
+        fs_handle.release_block(inode.first_block)?;
+        fs_handle.release_inode(inode.index)?;
         Ok(())
     }
 }

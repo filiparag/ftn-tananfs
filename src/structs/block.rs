@@ -74,6 +74,12 @@ impl PermanentIndexed for Block {
     }
 }
 
+impl PartialEq for Block {
+    fn eq(&self, other: &Self) -> bool {
+        self.index == other.index && self.data == other.data
+    }
+}
+
 impl Display for Block {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Block {{")?;

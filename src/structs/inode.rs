@@ -85,6 +85,25 @@ impl Default for Inode {
     }
 }
 
+impl PartialEq for Inode {
+    fn eq(&self, other: &Self) -> bool {
+        let (m1, m2) = (self.metadata, other.metadata);
+        self.index == other.index
+            && self.mode == other.mode
+            && self.r#type == other.r#type
+            && self.size == other.size
+            && self.uid == other.uid
+            && self.gid == other.gid
+            && self.atime == other.atime
+            && self.ctime == other.ctime
+            && self.mtime == other.mtime
+            && self.dtime == other.dtime
+            && self.block_count == other.block_count
+            && m1 == m2
+            && self.first_block == other.first_block
+    }
+}
+
 impl Display for Inode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Inode {{")?;

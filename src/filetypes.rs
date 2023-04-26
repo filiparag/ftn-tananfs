@@ -3,6 +3,7 @@ mod directory;
 mod directory_child;
 mod helpers;
 mod raw_file;
+mod regular_file;
 
 use std::sync::{Arc, Mutex};
 
@@ -24,6 +25,11 @@ pub struct RawByteFile {
     pub(crate) filesystem: Arc<Mutex<Filesystem>>,
 }
 
+#[derive(Debug, Clone)]
+pub struct RegularFile {
+    pub(crate) inode: Inode,
+    pub(crate) file: RawByteFile,
+}
 
 #[derive(Debug, Clone)]
 pub struct DirectoryChild {
