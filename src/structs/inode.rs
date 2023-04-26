@@ -107,23 +107,23 @@ impl PartialEq for Inode {
 impl Display for Inode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Inode {{")?;
-        writeln!(f, "    index: {}", self.index as u64)?;
-        writeln!(f, "    mode: {}", self.mode as u16)?;
-        writeln!(f, "    r#t{:?}", self.r#type)?;
-        writeln!(f, "    size: {}", self.size as u64)?;
-        writeln!(f, "    uid: {}", self.uid as u32)?;
-        writeln!(f, "    gid: {}", self.gid as u32)?;
-        writeln!(f, "    atime: {}", self.atime as u64)?;
-        writeln!(f, "    ctime: {}", self.ctime as u64)?;
-        writeln!(f, "    mtime: {}", self.mtime as u64)?;
-        writeln!(f, "    dtime: {}", self.dtime as u64)?;
-        writeln!(f, "    block_count: {}", self.block_count as u64)?;
+        writeln!(f, "    index: {}", { self.index })?;
+        writeln!(f, "    mode: {}", { self.mode })?;
+        writeln!(f, "    r#t{:?}", { self.r#type })?;
+        writeln!(f, "    size: {}", { self.size })?;
+        writeln!(f, "    uid: {}", { self.uid })?;
+        writeln!(f, "    gid: {}", { self.gid })?;
+        writeln!(f, "    atime: {}", { self.atime })?;
+        writeln!(f, "    ctime: {}", { self.ctime })?;
+        writeln!(f, "    mtime: {}", { self.mtime })?;
+        writeln!(f, "    dtime: {}", { self.dtime })?;
+        writeln!(f, "    block_count: {}", { self.block_count })?;
         writeln!(f, "    metadata: [")?;
         for chunk in self.metadata {
             writeln!(f, "        {chunk:0x}")?;
         }
         writeln!(f, "    ]")?;
-        writeln!(f, "    first_block: {}", self.first_block as u64)?;
+        writeln!(f, "    first_block: {}", { self.first_block })?;
         write!(f, "}}")?;
         Ok(())
     }

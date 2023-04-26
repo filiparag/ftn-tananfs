@@ -3,7 +3,6 @@
 use error::Error;
 use filesystem::Filesystem;
 
-mod device;
 mod error;
 mod filesystem;
 mod filetypes;
@@ -27,7 +26,7 @@ fn execute(cmd: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         .write(false)
         .open(args.get(0).unwrap_or(&"/tmp/fakefs".to_owned()))?;
     let mut fs = Filesystem::load(Box::new(dev), 512)?;
-    if cmd.len() == 0 {
+    if cmd.is_empty() {
         return Ok(());
     }
     match cmd[0].as_str() {

@@ -174,7 +174,7 @@ impl Filesystem {
             return Err(Error::OutOfBounds);
         }
         if let Some(inode) = self.cache.get_inode(index) {
-            Ok(inode.clone())
+            Ok(inode)
         } else {
             let inode = Inode::load(&mut self.device, &self.superblock, index)?;
             self.cache.set_inode(&inode);
@@ -188,7 +188,7 @@ impl Filesystem {
             return Err(Error::OutOfBounds);
         }
         if let Some(block) = self.cache.get_block(index) {
-            Ok(block.clone())
+            Ok(block)
         } else {
             let block = Block::load(&mut self.device, &self.superblock, index)?;
             self.cache.set_block(&block);

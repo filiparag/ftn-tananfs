@@ -105,7 +105,7 @@ impl Directory {
     }
 
     pub fn remove_child(&mut self, name: &str) -> Result<(), Error> {
-        let inode = match self.children.iter_mut().find(|c| &c.name == name) {
+        let inode = match self.children.iter_mut().find(|c| c.name == name) {
             Some(child) => child.inode,
             None => return Err(Error::NotFound),
         };

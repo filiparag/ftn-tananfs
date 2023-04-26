@@ -156,8 +156,8 @@ impl Bitmap<Block> {
 impl<T: AsBitmap> Display for Bitmap<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Bitmap {{",)?;
-        writeln!(f, "    count: {}", self.count as u64)?;
-        writeln!(f, "    position: {}", self.position as u64)?;
+        writeln!(f, "    count: {}", { self.count })?;
+        writeln!(f, "    position: {}", { self.position })?;
         writeln!(f, "    bitfield: [")?;
         for bit in 0..self.count {
             if self.get(bit).unwrap() {

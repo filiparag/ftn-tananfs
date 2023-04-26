@@ -123,12 +123,12 @@ impl Superblock {
 impl Display for Superblock {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Superblock {{")?;
-        writeln!(f, "    inode_count: {}", self.inode_count as u64)?;
-        writeln!(f, "    inodes_free: {},", self.inodes_free as u64)?;
-        writeln!(f, "    block_count: {},", self.block_count as u64)?;
-        writeln!(f, "    blocks_free: {},", self.blocks_free as u64)?;
-        writeln!(f, "    block_size: {},", self.block_size as u32)?;
-        writeln!(f, "    magic: {}", self.magic as u16)?;
+        writeln!(f, "    inode_count: {}", { self.inode_count })?;
+        writeln!(f, "    inodes_free: {},", { self.inodes_free })?;
+        writeln!(f, "    block_count: {},", { self.block_count })?;
+        writeln!(f, "    blocks_free: {},", { self.blocks_free })?;
+        writeln!(f, "    block_size: {},", { self.block_size })?;
+        writeln!(f, "    magic: {}", { self.magic })?;
         write!(f, "}}")?;
         Ok(())
     }

@@ -83,13 +83,13 @@ impl PartialEq for Block {
 impl Display for Block {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Block {{")?;
-        writeln!(f, "    index: {}", self.index as u64)?;
+        writeln!(f, "    index: {}", { self.index })?;
         writeln!(f, "    data: [")?;
         write!(f, "         ")?;
         for column in 0..16 {
             write!(f, "{column:3}")?;
         }
-        writeln!(f, "")?;
+        writeln!(f)?;
         for (index, byte) in self.data.iter().enumerate() {
             if index % 16 == 0 {
                 write!(f, "     {index:3}:")?;
@@ -103,7 +103,7 @@ impl Display for Block {
             }
 
             if index % 16 == 15 {
-                writeln!(f, "")?;
+                writeln!(f)?;
             }
         }
         writeln!(f, "    ]")?;

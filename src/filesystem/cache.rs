@@ -63,7 +63,7 @@ impl Cache {
     pub fn get_inode(&mut self, index: u64) -> Option<Inode> {
         if let Some(line) = self.inodes.get_mut(&index) {
             line.atime = Instant::now();
-            Some(line.get().clone())
+            Some(*line.get())
         } else {
             None
         }
@@ -81,7 +81,7 @@ impl Cache {
     pub fn set_inode(&mut self, inode: &Inode) {
         let index = inode.index;
         if let Some(line) = self.inodes.get_mut(&index) {
-            line.update(&inode);
+            line.update(inode);
         } else {
             self.inodes.insert(index, CacheLine::new(inode));
         }
@@ -90,7 +90,7 @@ impl Cache {
     pub fn set_block(&mut self, block: &Block) {
         let index = block.index;
         if let Some(line) = self.blocks.get_mut(&index) {
-            line.update(&block);
+            line.update(block);
         } else {
             self.blocks.insert(index, CacheLine::new(block));
         }
