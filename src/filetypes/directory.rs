@@ -89,4 +89,35 @@ impl Directory {
         fs_handle.release_inode(self.inode.index)?;
         Ok(())
     }
+
+    pub fn add_child(&mut self, name: &str, inode: u64) -> Result<(), Error> {
+        let child = DirectoryChild {
+            inode,
+            name: name.to_owned(),
+        };
+        if !self.children.contains(&child) {
+            self.children.push(child);
+            self.inode.metadata[1] += 1;
+            Ok(())
+        } else {
+            Err(Error::NameOrInodeDuplicate)
+        }
+    }
+
+    pub fn remove_child(&mut self, name: &str) -> Result<(), Error> {
+        let inode = match self.children.iter_mut().find(|c| &c.name == name) {
+            Some(child) => child.inode,
+            None => return Err(Error::NotFound),
+        };
+        RawByteFile::remove(&self.file.filesystem, inode)?;
+        self.children.retain(|c| c.name != *name);
+        self.inode.metadata[1] -= 1;
+        Ok(())
+    }
+}
+
+impl Drop for Directory {
+    fn drop(&mut self) {
+        self.flush().expect("failed to flush dropped directory")
+    }
 }
