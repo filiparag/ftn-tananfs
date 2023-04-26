@@ -1,25 +1,28 @@
-use std::collections::BTreeMap;
 use std::fmt::Debug;
+
 use std::io::Read;
 use std::io::Seek;
 use std::io::Write;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
+use std::time::Duration;
+use std::time::Instant;
 
 use crate::structs::*;
 use crate::Error;
 
+mod cache;
 mod fuse;
+
+use cache::Cache;
+
 pub trait BlockDevice: Read + Write + Seek + Debug {}
 
 impl BlockDevice for std::fs::File {}
 
-#[derive(Debug, Default)]
-pub struct Cache {
-    inodes: BTreeMap<u64, Inode>,
-    blocks: BTreeMap<u64, Block>,
-}
+pub const DIRTY_PAGE_MAX_SECONDS: Duration = Duration::from_millis(1000);
+pub const LRU_MAX_ENTRIES: usize = 32;
 
 #[derive(Debug)]
 pub struct Filesystem {
@@ -28,6 +31,7 @@ pub struct Filesystem {
     pub(crate) blocks: Bitmap<Block>,
     pub(crate) device: Box<dyn BlockDevice>,
     pub(crate) cache: Cache,
+    pub(crate) last_flush: Option<Instant>,
 }
 
 #[derive(Debug)]
@@ -54,6 +58,7 @@ impl Filesystem {
             blocks: Bitmap::<Block>::new(&superblock),
             device,
             cache: Cache::default(),
+            last_flush: None,
         }
     }
 
@@ -73,20 +78,39 @@ impl Filesystem {
             blocks: bitmaps.1,
             device,
             cache: Cache::default(),
+            last_flush: None,
         })
     }
 
     /// Flush filesystem changes to its block device
     pub(crate) fn flush(&mut self) -> Result<(), Error> {
-        for block in self.cache.blocks.values() {
-            block.flush(&mut self.device, &self.superblock)?;
+        if let Some(last) = self.last_flush {
+            if Instant::now().duration_since(last) < DIRTY_PAGE_MAX_SECONDS {
+                return Ok(());
+            }
         }
-        for inode in self.cache.inodes.values() {
-            inode.flush(&mut self.device, &self.superblock)?;
-        }
+        self.flush_cache()?;
         self.superblock.flush(&mut self.device)?;
         self.inodes.flush(&mut self.device)?;
         self.blocks.flush(&mut self.device)?;
+        self.last_flush = Some(Instant::now());
+        Ok(())
+    }
+
+    fn flush_cache(&mut self) -> Result<(), Error> {
+        self.cache.prune()?;
+        for inode in self.cache.inodes.values_mut() {
+            if inode.modified {
+                inode.value.flush(&mut self.device, &self.superblock)?;
+                inode.modified = false;
+            }
+        }
+        for block in self.cache.blocks.values_mut() {
+            if block.modified {
+                block.value.flush(&mut self.device, &self.superblock)?;
+                block.modified = false;
+            }
+        }
         Ok(())
     }
 
@@ -98,6 +122,7 @@ impl Filesystem {
             }
             self.superblock.inodes_free -= 1;
             self.inodes.set(index, true)?;
+            self.flush()?;
             Ok(index)
         } else {
             Err(Error::OutOfMemory)
@@ -109,6 +134,7 @@ impl Filesystem {
         if self.inodes.get(index)? {
             self.superblock.inodes_free += 1;
             self.inodes.set(index, false)?;
+            self.flush()?;
             Ok(())
         } else {
             Err(Error::DoubleRelease)
@@ -123,6 +149,7 @@ impl Filesystem {
             }
             self.superblock.blocks_free -= 1;
             self.blocks.set(index, true)?;
+            self.flush()?;
             Ok(index)
         } else {
             Err(Error::OutOfMemory)
@@ -134,6 +161,7 @@ impl Filesystem {
         if self.blocks.get(index)? {
             self.superblock.blocks_free += 1;
             self.blocks.set(index, false)?;
+            self.flush()?;
             Ok(())
         } else {
             Err(Error::DoubleRelease)
@@ -145,7 +173,13 @@ impl Filesystem {
         if !self.inodes.get(index)? {
             return Err(Error::OutOfBounds);
         }
-        Inode::load(&mut self.device, &self.superblock, index)
+        if let Some(inode) = self.cache.get_inode(index) {
+            Ok(inode.clone())
+        } else {
+            let inode = Inode::load(&mut self.device, &self.superblock, index)?;
+            self.cache.set_inode(&inode);
+            Ok(inode)
+        }
     }
 
     /// Load block with index
@@ -153,17 +187,27 @@ impl Filesystem {
         if !self.blocks.get(index)? {
             return Err(Error::OutOfBounds);
         }
-        Block::load(&mut self.device, &self.superblock, index)
+        if let Some(block) = self.cache.get_block(index) {
+            Ok(block.clone())
+        } else {
+            let block = Block::load(&mut self.device, &self.superblock, index)?;
+            self.cache.set_block(&block);
+            Ok(block)
+        }
     }
 
     /// Flush inode
     pub(crate) fn flush_inode(&mut self, inode: &Inode) -> Result<(), Error> {
-        inode.flush(&mut self.device, &self.superblock)
+        self.cache.set_inode(inode);
+        self.flush()?;
+        Ok(())
     }
 
     /// Flush block
     pub(crate) fn flush_block(&mut self, block: &Block) -> Result<(), Error> {
-        block.flush(&mut self.device, &self.superblock)
+        self.cache.set_block(block);
+        self.flush()?;
+        Ok(())
     }
 }
 
