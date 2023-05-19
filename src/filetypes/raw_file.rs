@@ -194,66 +194,84 @@ impl RawByteFile {
         if new_capacity < self.size {
             return Err(Error::InsufficientBytes);
         }
-        let mut last_block = self.get_nth_block(self.block_count - 1)?;
-        let mut fs = self.filesystem.lock()?;
-        let previous_cursor = self.cursor.position();
+        if self.first_block == NULL_BLOCK {
+            self.initialize()?;
+        }
+        let mut fs_handle = self.filesystem.lock()?;
         let capacity_delta = new_capacity - self.size;
-        let mut total_allocated_bytes = 0;
-        self.cursor.set(self.size);
-        let written = empty_block_data(&mut last_block, self.cursor.byte()) as u64;
-        total_allocated_bytes += written;
-        self.cursor.advance(written);
-        if total_allocated_bytes == capacity_delta {
-            fs.flush_block(&last_block)?;
+        let bytes_per_block = bytes_per_block(fs_handle.superblock.block_size);
+        let mut last_block = fs_handle.load_block(self.last_block, false)?;
+        // New capacity fits into existing blocks
+        if new_capacity <= self.block_count * bytes_per_block {
+            assert_eq!(get_next_block(&last_block), NULL_BLOCK);
+            assert!(capacity_delta <= bytes_per_block);
+            empty_block_data(
+                &mut last_block,
+                (fs_handle.superblock.block_size as u64 - capacity_delta) as usize,
+            );
+            self.size = new_capacity;
+            fs_handle.flush_block(&last_block)?;
             return Ok(());
         }
-        let bytes_per_block = bytes_per_block(fs.superblock.block_size);
+        // New capacity exceeds existing blocks
+        let previous_cursor = self.cursor.position();
+        self.cursor.set(self.size);
+        let written = empty_block_data(&mut last_block, self.cursor.byte()) as u64;
+        let mut total_allocated_bytes = written;
+        fs_handle.flush_block(&last_block)?;
+        drop(fs_handle);
         while total_allocated_bytes < capacity_delta {
-            let next_block = fs.acquire_block()?;
-            set_next_block(&mut last_block, next_block);
-            fs.flush_block(&last_block)?;
-            last_block = fs.load_block(next_block)?;
-            empty_block_data(&mut last_block, 0);
-            set_next_block(&mut last_block, NULL_BLOCK);
+            self.append_block()?;
             total_allocated_bytes += bytes_per_block;
-            self.block_count += 1;
         }
-        fs.flush_block(&last_block)?;
         self.size = new_capacity;
         self.cursor.set(previous_cursor);
         Ok(())
     }
 
-    /// Shrink the file to a new capacity  
+    /// Shrink the file to a new capacity
     /// Seeking cursor's position will be kept only if it remains inside shrinked file,
     /// otherwise it is set to zero
     pub fn shrink(&mut self, new_capacity: u64) -> Result<(), Error> {
+        if new_capacity == self.size {
+            return Ok(());
+        }
         if new_capacity > self.size {
             return Err(Error::OutOfBounds);
         }
         let previous_cursor = self.cursor.position();
         self.cursor.set(new_capacity);
-        if !(self.block_count == 1 && self.cursor.block() == 0) {
-            let mut last_block = self.get_nth_block(self.cursor.block())?;
-            let mut fs = self.filesystem.lock()?;
-            let mut current_block = fs.load_block(get_next_block(&last_block))?;
-            while self.block_count > self.cursor.block() + 1 {
-                let next_block = get_next_block(&current_block);
-                fs.release_block(current_block.index)?;
+        let last_block = self.get_nth_block(self.cursor.block())?;
+        let mut fs_handle = self.filesystem.lock()?;
+        let block_delta = self.block_count - (self.cursor.block() + 1);
+        // Check if blocks have to be released
+        if block_delta > 0 {
+            let mut current_block = get_next_block(&last_block);
+            for _ in 0..block_delta {
+                assert_ne!(current_block, NULL_BLOCK);
+                let block = fs_handle.load_block(current_block, false)?;
+                fs_handle.release_block(block.index)?;
                 self.block_count -= 1;
-                if next_block == NULL_BLOCK {
-                    break;
-                }
-                current_block = fs.load_block(next_block)?;
+                current_block = get_next_block(&block);
             }
-            set_next_block(&mut last_block, NULL_BLOCK);
-            fs.flush_block(&last_block)?;
         }
-        self.size = new_capacity;
-        if new_capacity < previous_cursor {
-            self.cursor.reset();
+        if new_capacity > 0 {
+            self.size = new_capacity;
+            self.last_block = last_block.index;
+            if new_capacity < previous_cursor {
+                self.cursor.reset();
+            } else {
+                self.cursor.set(previous_cursor);
+            }
         } else {
-            self.cursor.set(previous_cursor);
+            assert_eq!(self.first_block, last_block.index);
+            fs_handle.release_block(self.first_block)?;
+            self.block_count -= 1;
+            assert_eq!(self.block_count, 0);
+            self.size = 0;
+            self.first_block = NULL_BLOCK;
+            self.last_block = NULL_BLOCK;
+            self.cursor.reset();
         }
         Ok(())
     }
@@ -267,9 +285,15 @@ impl RawByteFile {
         let mut file = Self::load(fs, inode)?;
         file.shrink(0)?;
         let mut fs_handle = fs.lock()?;
-        fs_handle.release_block(inode.first_block)?;
+        assert_eq!(file.first_block, NULL_BLOCK);
         fs_handle.release_inode(inode.index)?;
         Ok(())
+    }
+
+    /// Update [Inode]'s block pointers
+    pub fn update_inode(&self, inode: &mut Inode) {
+        inode.first_block = self.first_block;
+        inode.last_block = self.last_block;
     }
 }
 
