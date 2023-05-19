@@ -36,10 +36,10 @@ impl Directory {
                     name.as_bytes().len() as u64,
                     NULL_BLOCK,
                     NULL_BLOCK,
-                    NULL_BLOCK,
                 ],
                 __padding_1: Default::default(),
                 first_block: file.first_block,
+                last_block: file.last_block,
             },
             file,
             name: name.to_owned(),
@@ -53,6 +53,7 @@ impl Directory {
         for child in self.children.iter() {
             child.flush(&mut self.file)?;
         }
+        self.file.update_inode(&mut self.inode);
         self.inode.mtime = timestamp_now();
         self.inode.block_count = self.file.block_count;
         self.inode.size = self.file.cursor.position();
@@ -85,7 +86,6 @@ impl Directory {
     pub fn remove(mut self) -> Result<(), Error> {
         self.file.shrink(0)?;
         let mut fs_handle = self.file.filesystem.lock()?;
-        fs_handle.release_block(self.inode.first_block)?;
         fs_handle.release_inode(self.inode.index)?;
         Ok(())
     }

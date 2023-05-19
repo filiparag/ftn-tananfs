@@ -80,7 +80,8 @@ impl Default for Inode {
             block_count: 0,
             metadata: [0; METADATA_IN_INODE],
             __padding_1: Default::default(),
-            first_block: 0,
+            first_block: NULL_BLOCK,
+            last_block: NULL_BLOCK,
         }
     }
 }
@@ -124,6 +125,7 @@ impl Display for Inode {
         }
         writeln!(f, "    ]")?;
         writeln!(f, "    first_block: {}", { self.first_block })?;
+        writeln!(f, "    last_block: {}", { self.last_block })?;
         write!(f, "}}")?;
         Ok(())
     }

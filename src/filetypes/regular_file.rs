@@ -24,17 +24,17 @@ impl RegularFile {
                 mtime: now,
                 dtime: u64::MAX,
                 block_count: 1,
-                metadata: [
-                    parent, NULL_BLOCK, NULL_BLOCK, NULL_BLOCK, NULL_BLOCK, NULL_BLOCK,
-                ],
+                metadata: [parent, NULL_BLOCK, NULL_BLOCK, NULL_BLOCK, NULL_BLOCK],
                 __padding_1: Default::default(),
                 first_block: file.first_block,
+                last_block: file.last_block,
             },
             file,
         })
     }
 
     pub fn flush(&mut self) -> Result<(), Error> {
+        self.file.update_inode(&mut self.inode);
         self.inode.mtime = timestamp_now();
         self.inode.block_count = self.file.block_count;
         self.inode.size = self.file.size;

@@ -12,7 +12,7 @@ use fuser::FileType;
 
 pub use bitmap::*;
 
-pub const METADATA_IN_INODE: usize = 6;
+pub const METADATA_IN_INODE: usize = 5;
 pub const DATA_PER_INODE: u64 = 4096;
 pub const MAGIC_SIGNATURE: u16 = 0xEF53;
 pub const NULL_BLOCK: u64 = u64::MAX;
@@ -86,6 +86,7 @@ pub struct Inode {
     /// Index of file's first block. Set to
     /// Every extra block references next in sequence in its first 8 bytes.
     pub(crate) first_block: u64,
+    pub(crate) last_block: u64,
 }
 
 #[derive(Debug, Clone)]

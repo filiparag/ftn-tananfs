@@ -19,6 +19,7 @@ pub trait File: Sized {
 #[derive(Debug, Clone)]
 pub struct RawByteFile {
     pub(crate) first_block: u64,
+    pub(crate) last_block: u64,
     pub(crate) block_count: u64,
     pub(crate) size: u64,
     pub(crate) cursor: BlockCursor,

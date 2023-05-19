@@ -33,7 +33,7 @@ fn execute(cmd: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         "s" => println!["{}", fs.superblock],
         "b" => {
             if cmd.len() == 2 {
-                println!["{}", fs.load_block(cmd[1].parse()?)?];
+                println!["{}", fs.load_block(cmd[1].parse()?, false)?];
             } else {
                 println!["{}", fs.blocks]
             }

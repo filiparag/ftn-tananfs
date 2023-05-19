@@ -11,17 +11,14 @@ use crate::{
 use super::{helpers::*, BlockCursor, RawByteFile, BYTES_IN_U64};
 
 impl RawByteFile {
-    /// Create an empty file with one allocated block
+    /// Create an empty file with no allocated blocks
     pub fn new(fs: &Arc<Mutex<Filesystem>>) -> Result<Self, Error> {
-        let mut fs_handle = fs.lock()?;
-        let first_block = fs_handle.acquire_block()?;
-        let mut block = fs_handle.load_block(first_block)?;
-        set_next_block(&mut block, NULL_BLOCK);
-        fs_handle.flush_block(&block)?;
+        let fs_handle = fs.lock()?;
         let cursor = BlockCursor::new(&fs_handle, (BYTES_IN_U64 as u32, 0));
         Ok(Self {
-            first_block,
-            block_count: 1,
+            first_block: NULL_BLOCK,
+            last_block: NULL_BLOCK,
+            block_count: 0,
             size: 0,
             cursor,
             filesystem: fs.clone(),
@@ -41,6 +38,7 @@ impl RawByteFile {
         let cursor = BlockCursor::new(&fs_handle, (BYTES_IN_U64 as u32, 0));
         Ok(Self {
             first_block: inode.first_block,
+            last_block: inode.last_block,
             block_count: inode.block_count,
             size: inode.size,
             cursor,
@@ -49,23 +47,33 @@ impl RawByteFile {
     }
 
     /// Retrieve file's n-th [Block]
-    pub fn get_nth_block(&self, position: u64) -> Result<Block, Error> {
+    pub fn get_nth_block(&mut self, position: u64) -> Result<Block, Error> {
         let mut fs = self.filesystem.lock()?;
-        let mut current_block = fs.load_block(self.first_block)?;
+        if self.first_block == NULL_BLOCK {
+            return Err(Error::NullBlock);
+        }
+        // Skip lookup for last block
+        if position + 1 == self.block_count {
+            // println!("skip lookup for {}", position);
+            return fs.load_block(self.last_block, false);
+        }
+        // println!("do lookup for {}", position);
+        let mut current_block = fs.load_block(self.first_block, false)?;
         for current_index in 0..=position {
             if current_index == position {
                 return Ok(current_block);
             }
             let next_block = get_next_block(&current_block);
+            // dbg!(position, next_block);
             if next_block == NULL_BLOCK {
                 return Err(Error::OutOfBounds);
             }
-            current_block = fs.load_block(next_block)?;
+            current_block = fs.load_block(next_block, false)?;
         }
         Err(Error::OutOfBounds)
     }
 
-    /// Read contents of the file into an [u8] buffer  
+    /// Read contents of the file into an [u8] buffer
     /// Use [seek](Self::seek) to set starting position and adjust buffer's length for end position
     pub fn read(&mut self, buffer: &mut [u8]) -> Result<(), Error> {
         if buffer.len() as u64 > self.size - self.cursor.position() {
@@ -96,7 +104,7 @@ impl RawByteFile {
             if next_block == NULL_BLOCK {
                 break;
             }
-            current_block = fs.load_block(next_block)?;
+            current_block = fs.load_block(next_block, false)?;
         }
         Ok(())
     }
@@ -150,7 +158,37 @@ impl RawByteFile {
         Ok(())
     }
 
-    /// Extend the file to a new capacity with trailing zeros  
+    /// Initialize first block if file is empty
+    pub fn initialize(&mut self) -> Result<(), Error> {
+        let mut fs_handle = self.filesystem.lock()?;
+        let index = fs_handle.acquire_block()?;
+        let mut block = fs_handle.load_block(index, true)?;
+        set_next_block(&mut block, NULL_BLOCK);
+        fs_handle.flush_block(&block)?;
+        self.first_block = block.index;
+        self.last_block = block.index;
+        self.block_count = 1;
+        Ok(())
+    }
+
+    /// Append an empty block to file's end
+    /// File size and seeking cursor's position will be kept
+    /// Needs housekeeping after being called
+    fn append_block(&mut self) -> Result<u64, Error> {
+        let mut fs_handle = self.filesystem.lock()?;
+        let mut old_last_block = fs_handle.load_block(self.last_block, false)?;
+        let next_block = fs_handle.acquire_block()?;
+        set_next_block(&mut old_last_block, next_block);
+        fs_handle.flush_block(&old_last_block)?;
+        let mut new_last_block = fs_handle.load_block(next_block, true)?;
+        set_next_block(&mut new_last_block, NULL_BLOCK);
+        fs_handle.flush_block(&new_last_block)?;
+        self.last_block = next_block;
+        self.block_count += 1;
+        Ok(next_block)
+    }
+
+    /// Extend the file to a new capacity with trailing zeros
     /// Seeking cursor's position will be kept
     pub fn extend(&mut self, new_capacity: u64) -> Result<(), Error> {
         if new_capacity < self.size {
@@ -297,6 +335,8 @@ impl Seek for RawByteFile {
 
 #[cfg(test)]
 mod test {
+    use crate::{filetypes::helpers::get_next_block, structs::NULL_BLOCK};
+
     use super::{Filesystem, RawByteFile};
     use std::{
         io::{Cursor, Seek},
@@ -320,18 +360,71 @@ mod test {
     }
 
     #[test]
-    fn write_and_read() {
+    fn extend_and_shrink() {
         let dev = Cursor::new(vec![0u8; 100_000]);
         let fs = Filesystem::new(Box::new(dev), 100_000, 512);
         let fs_handle = Arc::new(Mutex::new(fs));
         let mut file = RawByteFile::new(&fs_handle).unwrap();
+        assert_eq!(file.block_count, 0);
+        _ = file.extend(1024);
+        assert_eq!(file.block_count, 3);
+        _ = file.extend(90_000);
+        assert_eq!(file.block_count, 179);
+        _ = file.shrink(80_000);
+        assert_eq!(file.block_count, 159);
+        _ = file.shrink(2000);
+        assert_eq!(file.block_count, 4);
+        _ = file.shrink(1800);
+        assert_eq!(file.block_count, 4);
+        _ = file.shrink(100);
+        assert_eq!(file.block_count, 1);
+        _ = file.shrink(1);
+        assert_eq!(file.block_count, 1);
+        _ = file.shrink(0);
+        assert_eq!(file.block_count, 0);
+        drop(file);
+        let mut file = RawByteFile::with_capacity(&fs_handle, 50_000).unwrap();
+        assert_eq!(file.block_count, 100);
+        _ = file.extend(60_000);
+        assert_eq!(file.block_count, 120);
+        assert_eq!(file.size, 60_000);
+        _ = file.shrink(50_000);
+        assert_eq!(file.block_count, 100);
+        _ = file.shrink(0);
+        drop(file);
+        let fs = fs_handle.lock().unwrap();
+        let blocks_used = fs.superblock.block_count - fs.superblock.blocks_free;
+        assert_eq!(blocks_used, 0);
+    }
+
+    #[test]
+    fn write_and_read() {
+        let dev = Cursor::new(vec![0u8; 20_000_000]);
+        let fs = Filesystem::new(Box::new(dev), 20_000_000, 512);
+        let fs_handle = Arc::new(Mutex::new(fs));
+        let mut file = RawByteFile::new(&fs_handle).unwrap();
         let buff = (1..=1000).map(|v| v as u8).collect::<Vec<u8>>();
-        _ = file.write(&buff);
+        let _ = file.write(&buff);
         assert_eq![file.size, buff.len() as u64];
         let mut buff1 = vec![0u8; 200];
         _ = file.seek(std::io::SeekFrom::Start(100));
         _ = file.read(&mut buff1);
         assert_eq![&buff[100..300], &buff1[..]];
+        let last = fs_handle
+            .lock()
+            .unwrap()
+            .load_block(file.last_block, false)
+            .unwrap();
+        assert_eq!(get_next_block(&last), NULL_BLOCK);
+        drop(file);
+        let mut file = RawByteFile::with_capacity(&fs_handle, 10_000_000).unwrap();
+        let buff = (1..=90_000_000).map(|v| v as u8).collect::<Vec<u8>>();
+        let _ = file.write(&buff);
+        let mut buff1 = vec![0u8; 2_000_000];
+        _ = file.seek(std::io::SeekFrom::Start(1_000_000));
+        _ = file.read(&mut buff1);
+        assert_eq![&buff[1_000_000..3_000_000], &buff1[..]];
+        drop(file);
     }
 
     #[test]
