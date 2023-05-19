@@ -29,6 +29,7 @@ impl RawByteFile {
     pub fn with_capacity(fs: &Arc<Mutex<Filesystem>>, capacity: u64) -> Result<Self, Error> {
         let mut file = Self::new(fs)?;
         file.extend(capacity)?;
+        assert_eq!(file.cursor.position(), 0);
         Ok(file)
     }
 
@@ -46,15 +47,20 @@ impl RawByteFile {
         })
     }
 
+    /// Bytes per block available for data
+    fn bytes_per_block(&self) -> Result<usize, Error> {
+        let fs = self.filesystem.lock()?;
+        Ok(bytes_per_block(fs.superblock.block_size) as usize)
+    }
+
     /// Retrieve file's n-th [Block]
-    pub fn get_nth_block(&mut self, position: u64) -> Result<Block, Error> {
+    pub fn get_nth_block(&self, position: u64) -> Result<Block, Error> {
         let mut fs = self.filesystem.lock()?;
         if self.first_block == NULL_BLOCK {
             return Err(Error::NullBlock);
         }
         // Skip lookup for last block
         if position + 1 == self.block_count {
-            // println!("skip lookup for {}", position);
             return fs.load_block(self.last_block, false);
         }
         // println!("do lookup for {}", position);
@@ -64,7 +70,6 @@ impl RawByteFile {
                 return Ok(current_block);
             }
             let next_block = get_next_block(&current_block);
-            // dbg!(position, next_block);
             if next_block == NULL_BLOCK {
                 return Err(Error::OutOfBounds);
             }
@@ -80,78 +85,59 @@ impl RawByteFile {
             return Err(Error::OutOfBounds);
         }
         let mut current_block = self.get_nth_block(self.cursor.block())?;
-        let mut fs = self.filesystem.lock()?;
-        let bytes_per_block = bytes_per_block(fs.superblock.block_size) as usize;
-        if buffer.len() < bytes_per_block - self.cursor.padded_byte() {
-            buffer.copy_from_slice(
-                &current_block.data[self.cursor.byte()..self.cursor.byte() + buffer.len()],
-            );
-            self.cursor.advance(buffer.len() as u64);
-            return Ok(());
-        }
         let mut total_read_bytes = 0;
         while total_read_bytes < buffer.len() {
-            let next_block = get_next_block(&current_block);
-            let read_bytes = usize::min(
-                buffer.len() - total_read_bytes,
-                bytes_per_block - self.cursor.padded_byte(),
+            let read = read_from_block(
+                &mut current_block,
+                self.cursor.byte(),
+                &mut buffer[total_read_bytes..],
             );
-            buffer[total_read_bytes..total_read_bytes + read_bytes].copy_from_slice(
-                &current_block.data[self.cursor.byte()..self.cursor.byte() + read_bytes],
-            );
-            total_read_bytes += read_bytes;
-            self.cursor.advance(read_bytes as u64);
-            if next_block == NULL_BLOCK {
+            total_read_bytes += read;
+            self.cursor.advance(read as u64);
+            if total_read_bytes == buffer.len() {
                 break;
             }
-            current_block = fs.load_block(next_block, false)?;
+            let mut fs_handle = self.filesystem.lock()?;
+            let next_block = get_next_block(&current_block);
+            current_block = fs_handle.load_block(next_block, false)?;
         }
         Ok(())
     }
 
-    /// Write contents of an [u8] buffer into the file  
-    /// File will be extended if buffer exceeds its capacity  
+    /// Write contents of an [u8] buffer into the file
+    /// File will be extended if buffer exceeds its capacity
     /// Use [seek](Self::seek) to set starting position and adjust buffer's length for end position
     pub fn write(&mut self, buffer: &[u8]) -> Result<(), Error> {
-        let mut current_block = self.get_nth_block(self.cursor.block())?;
-        let mut fs = self.filesystem.lock()?;
-        let bytes_per_block = bytes_per_block(fs.superblock.block_size) as usize;
-        if buffer.len() < bytes_per_block - self.cursor.padded_byte() {
-            current_block.data[self.cursor.byte()..self.cursor.byte() + buffer.len()]
-                .copy_from_slice(buffer);
-            self.cursor.advance(buffer.len() as u64);
-            if self.cursor.position() > self.size {
-                self.size = self.cursor.position();
-            }
-            return fs.flush_block(&current_block);
+        if self.first_block == NULL_BLOCK {
+            self.initialize()?;
         }
+        let mut current_block = self.get_nth_block(self.cursor.block())?;
         let mut total_written_bytes = 0;
         while total_written_bytes < buffer.len() {
-            let next_block = get_next_block(&current_block);
-            let write_bytes = usize::min(
-                buffer.len() - total_written_bytes,
-                bytes_per_block - self.cursor.padded_byte(),
+            let written = write_to_block(
+                &mut current_block,
+                self.cursor.byte(),
+                &buffer[total_written_bytes..],
             );
-            current_block.data[self.cursor.byte()..self.cursor.byte() + write_bytes]
-                .copy_from_slice(&buffer[total_written_bytes..total_written_bytes + write_bytes]);
-            total_written_bytes += write_bytes;
-            self.cursor.advance(write_bytes as u64);
+            total_written_bytes += written;
+            self.cursor.advance(written as u64);
             if total_written_bytes == buffer.len() {
-                fs.flush_block(&current_block)?;
                 break;
-            } else if next_block == NULL_BLOCK && self.cursor.block() + 1 > self.block_count {
-                let new_block = fs.acquire_block()?;
-                set_next_block(&mut current_block, new_block);
-                fs.flush_block(&current_block)?;
-                current_block = fs.load_block(new_block)?;
-                empty_block_data(&mut current_block, 0);
-                set_next_block(&mut current_block, NULL_BLOCK);
-                self.block_count += 1;
-            } else {
-                fs.flush_block(&current_block)?;
-                current_block = fs.load_block(next_block)?;
             }
+            let next_block;
+            let mut fs_handle = self.filesystem.lock()?;
+            fs_handle.flush_block(&current_block)?;
+            drop(fs_handle);
+            if get_next_block(&current_block) == NULL_BLOCK {
+                next_block = self.append_block()?;
+            } else {
+                next_block = get_next_block(&current_block);
+            }
+            let mut fs_handle = self.filesystem.lock()?;
+            current_block = fs_handle.load_block(next_block, false)?;
         }
+        let mut fs_handle = self.filesystem.lock()?;
+        fs_handle.flush_block(&current_block)?;
         if self.cursor.position() > self.size {
             self.size = self.cursor.position();
         }
@@ -168,6 +154,7 @@ impl RawByteFile {
         self.first_block = block.index;
         self.last_block = block.index;
         self.block_count = 1;
+        self.cursor.reset();
         Ok(())
     }
 
@@ -177,7 +164,7 @@ impl RawByteFile {
     fn append_block(&mut self) -> Result<u64, Error> {
         let mut fs_handle = self.filesystem.lock()?;
         let mut old_last_block = fs_handle.load_block(self.last_block, false)?;
-        let next_block = fs_handle.acquire_block()?;
+        let next_block: u64 = fs_handle.acquire_block()?;
         set_next_block(&mut old_last_block, next_block);
         fs_handle.flush_block(&old_last_block)?;
         let mut new_last_block = fs_handle.load_block(next_block, true)?;
@@ -359,8 +346,6 @@ impl Seek for RawByteFile {
 
 #[cfg(test)]
 mod test {
-    use crate::{filetypes::helpers::get_next_block, structs::NULL_BLOCK};
-
     use super::{Filesystem, RawByteFile};
     use std::{
         io::{Cursor, Seek},
@@ -426,29 +411,26 @@ mod test {
         let dev = Cursor::new(vec![0u8; 20_000_000]);
         let fs = Filesystem::new(Box::new(dev), 20_000_000, 512);
         let fs_handle = Arc::new(Mutex::new(fs));
-        let mut file = RawByteFile::new(&fs_handle).unwrap();
-        let buff = (1..=1000).map(|v| v as u8).collect::<Vec<u8>>();
-        let _ = file.write(&buff);
-        assert_eq![file.size, buff.len() as u64];
-        let mut buff1 = vec![0u8; 200];
-        _ = file.seek(std::io::SeekFrom::Start(100));
-        _ = file.read(&mut buff1);
-        assert_eq![&buff[100..300], &buff1[..]];
-        let last = fs_handle
-            .lock()
-            .unwrap()
-            .load_block(file.last_block, false)
-            .unwrap();
-        assert_eq!(get_next_block(&last), NULL_BLOCK);
-        drop(file);
-        let mut file = RawByteFile::with_capacity(&fs_handle, 10_000_000).unwrap();
-        let buff = (1..=90_000_000).map(|v| v as u8).collect::<Vec<u8>>();
-        let _ = file.write(&buff);
-        let mut buff1 = vec![0u8; 2_000_000];
-        _ = file.seek(std::io::SeekFrom::Start(1_000_000));
-        _ = file.read(&mut buff1);
-        assert_eq![&buff[1_000_000..3_000_000], &buff1[..]];
-        drop(file);
+        for capacity in (0..=1001).step_by(331) {
+            for write_buffer in (400..=100_000).step_by(2017) {
+                for read_buffer in (201..=write_buffer - 100).step_by(1013) {
+                    for seek in (30..50).step_by(1013) {
+                        let mut file =
+                            RawByteFile::with_capacity(&fs_handle, capacity * 123).unwrap();
+                        let buff = (1..=write_buffer)
+                            .map(|v| (v / 504 + 1) as u8)
+                            .collect::<Vec<u8>>();
+                        let mut buff1 = vec![0u8; read_buffer];
+                        assert!(buff1.len() <= buff.len());
+                        assert!(file.write(&buff).is_ok());
+                        assert!(file.seek(std::io::SeekFrom::Start(seek as u64)).is_ok());
+                        assert!(file.read(&mut buff1).is_ok());
+                        assert_eq![&buff[seek..seek + read_buffer], &buff1[..]];
+                        assert!(file.shrink(0).is_ok());
+                    }
+                }
+            }
+        }
     }
 
     #[test]

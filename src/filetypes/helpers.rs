@@ -74,3 +74,15 @@ pub fn read_sized_string(file: &mut RawByteFile) -> Result<String, Error> {
     let length = read_u16(file)?;
     read_string(file, length as usize)
 }
+
+pub fn write_to_block(block: &mut Block, offset: usize, buffer: &[u8]) -> usize {
+    let write_bytes = usize::min(block.data.len() - offset, buffer.len());
+    block.data[offset..offset + write_bytes].copy_from_slice(&buffer[..write_bytes]);
+    write_bytes
+}
+
+pub fn read_from_block(block: &Block, offset: usize, buffer: &mut [u8]) -> usize {
+    let read_bytes = usize::min(block.data.len() - offset, buffer.len());
+    buffer[..read_bytes].copy_from_slice(&block.data[offset..offset + read_bytes]);
+    read_bytes
+}

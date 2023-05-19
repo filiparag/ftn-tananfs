@@ -187,6 +187,7 @@ impl Filesystem {
 
     /// Load block with index.
     /// If `empty` is true, skip loading data and return zero-initialized block
+    /// Next block pointer is also cleared, has to be set manually
     pub(crate) fn load_block(&mut self, index: u64, empty: bool) -> Result<Block, Error> {
         if !self.blocks.get(index)? {
             return Err(Error::OutOfBounds);
