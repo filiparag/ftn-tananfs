@@ -90,7 +90,7 @@ impl RawByteFile {
         let mut total_read_bytes = 0;
         while total_read_bytes < buffer.len() {
             let read = read_from_block(
-                &mut current_block,
+                &current_block,
                 self.cursor.byte(),
                 &mut buffer[total_read_bytes..],
             );
@@ -131,15 +131,14 @@ impl RawByteFile {
             if total_written_bytes == buffer.len() {
                 break;
             }
-            let next_block;
             let mut fs_handle = self.filesystem.lock()?;
             fs_handle.flush_block(&current_block)?;
             drop(fs_handle);
-            if get_next_block(&current_block) == NULL_BLOCK {
-                next_block = self.append_block()?;
+            let next_block = if get_next_block(&current_block) == NULL_BLOCK {
+                self.append_block()?
             } else {
-                next_block = get_next_block(&current_block);
-            }
+                get_next_block(&current_block)
+            };
             let mut fs_handle = self.filesystem.lock()?;
             current_block = fs_handle.load_block(next_block, false)?;
         }
