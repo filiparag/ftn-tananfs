@@ -59,11 +59,13 @@ impl RawByteFile {
         if self.first_block == NULL_BLOCK {
             return Err(Error::NullBlock);
         }
+        if position >= self.block_count {
+            return Err(Error::OutOfBounds);
+        };
         // Skip lookup for last block
         if position + 1 == self.block_count {
             return fs.load_block(self.last_block, false);
-        }
-        // println!("do lookup for {}", position);
+        };
         let mut current_block = fs.load_block(self.first_block, false)?;
         for current_index in 0..=position {
             if current_index == position {
@@ -110,6 +112,11 @@ impl RawByteFile {
     pub fn write(&mut self, buffer: &[u8]) -> Result<(), Error> {
         if self.first_block == NULL_BLOCK {
             self.initialize()?;
+        }
+        // Previous write filled last block and moved cursor to a
+        // nonexistent next block
+        if self.cursor.position() % 504 == 0 && self.size > 0 {
+            self.append_block()?;
         }
         let mut current_block = self.get_nth_block(self.cursor.block())?;
         let mut total_written_bytes = 0;
@@ -160,7 +167,6 @@ impl RawByteFile {
 
     /// Append an empty block to file's end
     /// File size and seeking cursor's position will be kept
-    /// Needs housekeeping after being called
     fn append_block(&mut self) -> Result<u64, Error> {
         let mut fs_handle = self.filesystem.lock()?;
         let mut old_last_block = fs_handle.load_block(self.last_block, false)?;
@@ -434,28 +440,21 @@ mod test {
     }
 
     #[test]
-    fn extend_and_shrink() {
-        let dev = Cursor::new(vec![0u8; 100_000]);
-        let fs = Filesystem::new(Box::new(dev), 100_000, 512);
+    fn chunked_write() {
+        let dev = Cursor::new(vec![0u8; 128_000_000]);
+        let fs = Filesystem::new(Box::new(dev), 128_000_000, 512);
         let fs_handle = Arc::new(Mutex::new(fs));
-        let mut file = RawByteFile::new(&fs_handle).unwrap();
-        let buff = (1..=50).map(|v| v as u8).collect::<Vec<u8>>();
-        _ = file.write(&buff);
-        _ = file.extend(200);
-        let mut buff1 = vec![0u8; 200];
-        _ = file.seek(std::io::SeekFrom::Start(0));
-        _ = file.read(&mut buff1);
-        assert_eq![&buff, &buff1[0..50]];
-        assert_eq![&buff1[50..200], [0u8; 150]];
-        let mut buff2 = vec![0u8; 30];
-        _ = file.shrink(30);
-        _ = file.seek(std::io::SeekFrom::Start(0));
-        _ = file.read(&mut buff2);
-        assert_eq![&buff[0..30], &buff2];
-        _ = file.extend(20000);
-        _ = file.shrink(15);
-        let mut buff3 = vec![0u8; 15];
-        _ = file.read(&mut buff3);
-        assert_eq![&buff[0..15], &buff3];
+        let mut file: RawByteFile = RawByteFile::new(&fs_handle).unwrap();
+        for pow2 in 7..=25 {
+            file.shrink(0).unwrap();
+            let chunk_size = 2u64.pow(pow2) + 1000;
+            for chunk in 0..50_000_000 / chunk_size {
+                assert!(file
+                    .seek(std::io::SeekFrom::Start(chunk * chunk_size))
+                    .is_ok());
+                assert!(file.write(&vec![0x4eu8; chunk_size as usize]).is_ok());
+                file.cursor.reset();
+            }
+        }
     }
 }
