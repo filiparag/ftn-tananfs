@@ -1,13 +1,9 @@
 use std::fmt::Debug;
+use std::io::{Read, Seek, Write};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
-use std::io::Read;
-use std::io::Seek;
-use std::io::Write;
-use std::sync::Arc;
-use std::sync::Mutex;
-use std::sync::MutexGuard;
-use std::time::Duration;
-use std::time::Instant;
+use log::info;
 
 use crate::structs::*;
 use crate::Error;
@@ -22,7 +18,7 @@ pub trait BlockDevice: Read + Write + Seek + Debug {}
 impl BlockDevice for std::fs::File {}
 
 pub const DIRTY_PAGE_MAX_SECONDS: Duration = Duration::from_millis(1000);
-pub const LRU_MAX_ENTRIES: usize = 32;
+pub const LRU_MAX_ENTRIES: usize = 131072;
 
 #[derive(Debug)]
 pub struct Filesystem {
@@ -82,13 +78,20 @@ impl Filesystem {
         })
     }
 
-    /// Flush filesystem changes to its block device
+    /// Flush filesystem changes to cache and periodically call [`Self::force_flush`]
     pub(crate) fn flush(&mut self) -> Result<(), Error> {
         if let Some(last) = self.last_flush {
             if Instant::now().duration_since(last) < DIRTY_PAGE_MAX_SECONDS {
                 return Ok(());
             }
         }
+        self.force_flush()?;
+        Ok(())
+    }
+
+    /// Force flush filesystem changes to its block device
+    pub(crate) fn force_flush(&mut self) -> Result<(), Error> {
+        info!("Flushing cache to disk");
         self.flush_cache()?;
         self.superblock.flush(&mut self.device)?;
         self.inodes.flush(&mut self.device)?;
@@ -182,10 +185,16 @@ impl Filesystem {
         }
     }
 
-    /// Load block with index
-    pub(crate) fn load_block(&mut self, index: u64) -> Result<Block, Error> {
+    /// Load block with index.
+    /// If `empty` is true, skip loading data and return zero-initialized block
+    pub(crate) fn load_block(&mut self, index: u64, empty: bool) -> Result<Block, Error> {
         if !self.blocks.get(index)? {
             return Err(Error::OutOfBounds);
+        }
+        if empty {
+            let block = Block::with_index(self, index)?;
+            self.cache.set_block(&block);
+            return Ok(block);
         }
         if let Some(block) = self.cache.get_block(index) {
             Ok(block)
@@ -242,6 +251,12 @@ mod tests {
         assert![fs.release_inode(1).is_err()];
         assert_eq![fs.acquire_inode().unwrap(), 1];
         assert_eq![fs.acquire_inode().unwrap(), 3];
+        for index in 4..fs.superblock.inode_count {
+            assert_eq![fs.acquire_inode().unwrap(), index];
+        }
+        for index in 4..fs.superblock.inode_count {
+            assert![fs.release_inode(index).is_ok()];
+        }
     }
 
     #[test]
@@ -255,5 +270,11 @@ mod tests {
         assert![fs.release_block(0).is_err()];
         assert_eq![fs.acquire_block().unwrap(), 0];
         assert_eq![fs.acquire_block().unwrap(), 3];
+        for index in 4..fs.superblock.block_count {
+            assert_eq![fs.acquire_block().unwrap(), index];
+        }
+        for index in 4..fs.superblock.block_count {
+            assert![fs.release_block(index).is_ok()];
+        }
     }
 }

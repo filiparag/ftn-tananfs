@@ -1,3 +1,4 @@
+use log::debug;
 use std::{
     collections::{BTreeMap, BinaryHeap},
     time::Instant,
@@ -5,6 +6,7 @@ use std::{
 
 use crate::{
     error::Error,
+    filetypes::RawByteFile,
     structs::{Block, Inode, PermanentIndexed},
 };
 
@@ -14,6 +16,7 @@ use super::{Filesystem, LRU_MAX_ENTRIES};
 pub struct Cache {
     pub(super) inodes: BTreeMap<u64, CacheLine<Inode>>,
     pub(super) blocks: BTreeMap<u64, CacheLine<Block>>,
+    pub(super) raw_byte_files: BTreeMap<u64, CacheLine<RawByteFile>>,
 }
 
 #[derive(Debug)]
@@ -41,6 +44,10 @@ impl LruLine {
 
 impl Cache {
     pub fn prune(&mut self) -> Result<(), Error> {
+        if self.inodes.len() + self.blocks.len() <= LRU_MAX_ENTRIES {
+            return Ok(());
+        }
+        debug!("Pruning LRU cache");
         let mut lru = BinaryHeap::<LruLine>::with_capacity(self.inodes.len() + self.blocks.len());
         self.inodes
             .values()
@@ -54,26 +61,36 @@ impl Cache {
             .iter()
             .skip(LRU_MAX_ENTRIES)
             .for_each(|item| match *item {
-                LruLine::Inode(_, index) => _ = self.inodes.remove(&index),
-                LruLine::Block(_, index) => _ = self.blocks.remove(&index),
+                LruLine::Inode(_, index) => {
+                    debug!("Pruning inode {index} from cache");
+                    _ = self.inodes.remove(&index)
+                }
+                LruLine::Block(_, index) => {
+                    debug!("Pruning block {index} from cache");
+                    _ = self.blocks.remove(&index)
+                }
             });
         Ok(())
     }
 
     pub fn get_inode(&mut self, index: u64) -> Option<Inode> {
         if let Some(line) = self.inodes.get_mut(&index) {
+            debug!("Fetching inode {index} from cache");
             line.atime = Instant::now();
             Some(*line.get())
         } else {
+            debug!("Missing inode {index} in cache");
             None
         }
     }
 
     pub fn get_block(&mut self, index: u64) -> Option<Block> {
         if let Some(line) = self.blocks.get_mut(&index) {
+            debug!("Fetching block {index} from cache");
             line.atime = Instant::now();
             Some(line.get().clone())
         } else {
+            debug!("Missing block {index} in cache");
             None
         }
     }
@@ -81,8 +98,10 @@ impl Cache {
     pub fn set_inode(&mut self, inode: &Inode) {
         let index = inode.index;
         if let Some(line) = self.inodes.get_mut(&index) {
+            debug!("Updating inode {index} in cache");
             line.update(inode);
         } else {
+            debug!("Adding inode {index} to cache");
             self.inodes.insert(index, CacheLine::new(inode));
         }
     }
@@ -90,8 +109,10 @@ impl Cache {
     pub fn set_block(&mut self, block: &Block) {
         let index = block.index;
         if let Some(line) = self.blocks.get_mut(&index) {
+            debug!("Updating block {index} in cache");
             line.update(block);
         } else {
+            debug!("Adding block {index} to cache");
             self.blocks.insert(index, CacheLine::new(block));
         }
     }

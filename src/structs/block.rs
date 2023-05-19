@@ -18,6 +18,17 @@ impl Block {
         })
     }
 
+    /// Create block with an arbitrary index which is already acquired
+    pub fn with_index(fs: &mut Filesystem, index: u64) -> Result<Self, Error> {
+        if !fs.blocks.get(index)? {
+            return Err(Error::NotFound);
+        }
+        Ok(Self {
+            index,
+            data: vec![0; fs.superblock.block_size as usize],
+        })
+    }
+
     /// Serialize any data to bytes and return ones exceeding Block's capacity
     pub fn write_any<T: Pod>(&mut self, position: usize, data: T) -> Result<Vec<u8>, Error> {
         let data_raw = bytemuck::bytes_of(&data);
