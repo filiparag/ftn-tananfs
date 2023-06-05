@@ -75,6 +75,13 @@ impl RegularFile {
         self.file.write(data)?;
         Ok(())
     }
+
+    pub fn remove(self) -> Result<(), Error> {
+        RawByteFile::remove(&self.file.filesystem, self.inode.index)?;
+        let mut fs_handle = self.file.filesystem.lock()?;
+        fs_handle.release_inode(self.inode.index)?;
+        Ok(())
+    }
 }
 
 impl Drop for RegularFile {

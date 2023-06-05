@@ -1,5 +1,8 @@
 #![allow(dead_code)]
 
+use filesystem::{Filesystem, FuseFs};
+use std::sync::{Arc, Mutex};
+
 use error::Error;
 mod error;
 mod filesystem;
