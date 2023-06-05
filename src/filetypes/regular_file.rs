@@ -3,6 +3,7 @@ use crate::structs::{Inode, NULL_BLOCK};
 use crate::{Error, Filesystem};
 
 use fuser::FileType;
+use log::debug;
 use std::io::Seek;
 use std::sync::{Arc, Mutex};
 
@@ -34,6 +35,8 @@ impl RegularFile {
     }
 
     pub fn flush(&mut self) -> Result<(), Error> {
+        let index = self.inode.index;
+        debug!("Flush regular file {index}");
         self.file.update_inode(&mut self.inode);
         self.inode.mtime = timestamp_now();
         self.inode.block_count = self.file.block_count;

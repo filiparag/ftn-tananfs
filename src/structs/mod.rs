@@ -14,8 +14,9 @@ pub use bitmap::*;
 
 pub const METADATA_IN_INODE: usize = 5;
 pub const DATA_PER_INODE: u64 = 4096;
-pub const MAGIC_SIGNATURE: u16 = 0xEF53;
+pub const MAGIC_SIGNATURE: u16 = 0x4650;
 pub const NULL_BLOCK: u64 = u64::MAX;
+pub const DEFAULT_BLOCK_SIZE: u32 = 4096;
 
 pub(crate) trait PermanentIndexed: Sized {
     type Error;

@@ -4,6 +4,7 @@ use crate::structs::{Inode, NULL_BLOCK};
 use crate::{Error, Filesystem};
 
 use fuser::FileType;
+use log::debug;
 use std::sync::{Arc, Mutex};
 
 impl Directory {
@@ -48,6 +49,8 @@ impl Directory {
     }
 
     pub fn flush(&mut self) -> Result<(), Error> {
+        let index = self.inode.index;
+        debug!("Flush directory {index}");
         self.file.cursor.reset();
         self.file.write(self.name.as_bytes())?;
         for child in self.children.iter() {

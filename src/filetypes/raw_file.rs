@@ -1,3 +1,4 @@
+use log::debug;
 use std::{
     io::Seek,
     sync::{Arc, Mutex},
@@ -13,6 +14,7 @@ use super::{helpers::*, BlockCursor, RawByteFile, BYTES_IN_U64};
 impl RawByteFile {
     /// Create an empty file with no allocated blocks
     pub fn new(fs: &Arc<Mutex<Filesystem>>) -> Result<Self, Error> {
+        debug!("Create a new raw byte file");
         let fs_handle = fs.lock()?;
         let cursor = BlockCursor::new(&fs_handle, (BYTES_IN_U64 as u32, 0));
         Ok(Self {
@@ -27,6 +29,7 @@ impl RawByteFile {
 
     /// Create zero-initialized file with specified capacity
     pub fn with_capacity(fs: &Arc<Mutex<Filesystem>>, capacity: u64) -> Result<Self, Error> {
+        debug!("Create a new raw byte file with capacity {capacity}");
         let mut file = Self::new(fs)?;
         file.extend(capacity)?;
         assert_eq!(file.cursor.position(), 0);
@@ -35,6 +38,8 @@ impl RawByteFile {
 
     /// Load file for given [Inode]
     pub fn load(fs: &Arc<Mutex<Filesystem>>, inode: Inode) -> Result<Self, Error> {
+        let index = inode.index;
+        debug!("Load raw byte file for inode {index}");
         let fs_handle = fs.lock()?;
         let cursor = BlockCursor::new(&fs_handle, (BYTES_IN_U64 as u32, 0));
         Ok(Self {
@@ -83,6 +88,7 @@ impl RawByteFile {
     /// Read contents of the file into an [u8] buffer
     /// Use [seek](Self::seek) to set starting position and adjust buffer's length for end position
     pub fn read(&mut self, buffer: &mut [u8]) -> Result<(), Error> {
+        debug!("Read {} bytes from raw byte file", buffer.len());
         if buffer.len() as u64 > self.size - self.cursor.position() {
             return Err(Error::OutOfBounds);
         }
@@ -110,12 +116,13 @@ impl RawByteFile {
     /// File will be extended if buffer exceeds its capacity
     /// Use [seek](Self::seek) to set starting position and adjust buffer's length for end position
     pub fn write(&mut self, buffer: &[u8]) -> Result<(), Error> {
+        debug!("Write {} bytes to raw byte file", buffer.len());
         if self.first_block == NULL_BLOCK {
             self.initialize()?;
         }
         // Previous write filled last block and moved cursor to a
         // nonexistent next block
-        if self.cursor.position() % 504 == 0 && self.size > 0 {
+        if self.cursor.position() % self.cursor.padded_block() == 0 && self.size > 0 {
             self.append_block()?;
         }
         let mut current_block = self.get_nth_block(self.cursor.block())?;
@@ -186,6 +193,10 @@ impl RawByteFile {
         if new_capacity < self.size {
             return Err(Error::InsufficientBytes);
         }
+        debug!(
+            "Extend raw byte file from {} to {new_capacity} bytes",
+            self.size
+        );
         if self.first_block == NULL_BLOCK {
             self.initialize()?;
         }
@@ -231,6 +242,10 @@ impl RawByteFile {
         if new_capacity > self.size {
             return Err(Error::OutOfBounds);
         }
+        debug!(
+            "Shrink raw byte file from {} to {new_capacity} bytes",
+            self.size
+        );
         let previous_cursor = self.cursor.position();
         self.cursor.set(new_capacity);
         let last_block = self.get_nth_block(self.cursor.block())?;
@@ -270,6 +285,7 @@ impl RawByteFile {
 
     /// Remove file for given [Inode] index
     pub fn remove(fs: &Arc<Mutex<Filesystem>>, inode: u64) -> Result<(), Error> {
+        debug!("Remove raw byte file for inode {inode}");
         let inode = {
             let mut fs_handle = fs.lock()?;
             fs_handle.load_inode(inode)?

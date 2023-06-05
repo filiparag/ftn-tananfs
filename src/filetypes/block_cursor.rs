@@ -1,5 +1,4 @@
 use super::BlockCursor;
-
 use crate::Filesystem;
 
 impl BlockCursor {
@@ -97,6 +96,10 @@ impl BlockCursor {
                 (self.block_size - self.block_padding_front - self.block_padding_back) as u64;
             self.current_block * padded_block + self.padded_byte() as u64
         }
+    }
+
+    pub fn padded_block(&self) -> u64 {
+        (self.block_size - self.block_padding_front - self.block_padding_back) as u64
     }
 }
 
