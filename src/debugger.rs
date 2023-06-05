@@ -21,11 +21,12 @@ fn prompt(separator: &str) -> Option<Vec<String>> {
 
 fn execute(cmd: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
-    let dev = std::fs::File::options()
+    let mut dev = std::fs::File::options()
         .read(true)
         .write(false)
         .open(args.get(0).unwrap_or(&"/tmp/fakefs".to_owned()))?;
-    let mut fs = Filesystem::load(Box::new(dev), 512)?;
+    let block_size = Filesystem::detect_existing(&mut dev)?.unwrap();
+    let mut fs = Filesystem::load(Box::new(dev), block_size)?;
     if cmd.is_empty() {
         return Ok(());
     }
