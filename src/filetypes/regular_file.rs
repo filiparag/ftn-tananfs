@@ -51,24 +51,26 @@ impl FileOperations for RegularFile {
         let inode = fs.lock()?.acquire_inode()?;
         let file = RawByteFile::new(fs)?;
         Directory::load(fs, parent)?.add_child(name, inode)?;
+        let inode = Inode {
+            index: inode,
+            mode: mode as u16,
+            r#type: FileType::RegularFile,
+            size: 0,
+            uid: 0,
+            gid: 0,
+            atime: now,
+            ctime: now,
+            mtime: now,
+            dtime: u64::MAX,
+            block_count: 1,
+            metadata: [parent, NULL_BLOCK, NULL_BLOCK, NULL_BLOCK, NULL_BLOCK],
+            __padding_1: Default::default(),
+            first_block: file.first_block,
+            last_block: file.last_block,
+        };
+        fs.lock()?.flush_inode(&inode)?;
         Ok(Self {
-            inode: Inode {
-                index: inode,
-                mode: mode as u16,
-                r#type: FileType::RegularFile,
-                size: 0,
-                uid: 0,
-                gid: 0,
-                atime: now,
-                ctime: now,
-                mtime: now,
-                dtime: u64::MAX,
-                block_count: 1,
-                metadata: [parent, NULL_BLOCK, NULL_BLOCK, NULL_BLOCK, NULL_BLOCK],
-                __padding_1: Default::default(),
-                first_block: file.first_block,
-                last_block: file.last_block,
-            },
+            inode,
             file,
             modified: true,
             removed: false,
@@ -116,11 +118,12 @@ impl FileOperations for RegularFile {
 
 impl Drop for RegularFile {
     fn drop(&mut self) {
+        let index = self.inode.index;
         if self.removed || !self.modified {
+            debug!("Skip flushing for dropped regular file {index}");
             return;
         }
         if let Err(e) = self.flush() {
-            let index = self.inode.index;
             error!("Error flushing dropped regular file {index}: {e}")
         }
     }

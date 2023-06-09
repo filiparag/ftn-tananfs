@@ -112,30 +112,32 @@ impl FileOperations for Directory {
         } else {
             Directory::load(fs, parent)?.add_child(name, inode)?;
         }
+        let inode = Inode {
+            index: inode,
+            mode: mode as u16,
+            r#type: FileType::Directory,
+            size: 0,
+            uid: 0,
+            gid: 0,
+            atime: now,
+            ctime: now,
+            mtime: now,
+            dtime: u64::MAX,
+            block_count: 1,
+            metadata: [
+                parent,
+                children_count,
+                name.as_bytes().len() as u64,
+                NULL_BLOCK,
+                NULL_BLOCK,
+            ],
+            __padding_1: Default::default(),
+            first_block: file.first_block,
+            last_block: file.last_block,
+        };
+        fs.lock()?.flush_inode(&inode)?;
         Ok(Self {
-            inode: Inode {
-                index: inode,
-                mode: mode as u16,
-                r#type: FileType::Directory,
-                size: 0,
-                uid: 0,
-                gid: 0,
-                atime: now,
-                ctime: now,
-                mtime: now,
-                dtime: u64::MAX,
-                block_count: 1,
-                metadata: [
-                    parent,
-                    children_count,
-                    name.as_bytes().len() as u64,
-                    NULL_BLOCK,
-                    NULL_BLOCK,
-                ],
-                __padding_1: Default::default(),
-                first_block: file.first_block,
-                last_block: file.last_block,
-            },
+            inode,
             file,
             name: name.to_owned(),
             children: Vec::new(),
@@ -214,11 +216,12 @@ impl FileOperations for Directory {
 
 impl Drop for Directory {
     fn drop(&mut self) {
+        let index = self.inode.index;
         if self.removed || !self.modified {
+            debug!("Skip flushing for dropped directory {index}");
             return;
         }
         if let Err(e) = self.flush() {
-            let index = self.inode.index;
             error!("Error flushing dropped directory {index}: {e}")
         }
     }

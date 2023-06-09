@@ -99,9 +99,11 @@ impl Filesystem {
     /// Flush filesystem changes to cache and periodically call [`Self::force_flush`]
     pub(crate) fn flush(&mut self) -> Result<(), Error> {
         debug!("Invoking filesystem flush");
-        if let Some(last) = self.last_flush {
-            if !FORCE_FLUSH_ALWAYS || Instant::now().duration_since(last) < DIRTY_PAGE_MAX_SECONDS {
-                return Ok(());
+        if !FORCE_FLUSH_ALWAYS {
+            if let Some(last) = self.last_flush {
+                if Instant::now().duration_since(last) < DIRTY_PAGE_MAX_SECONDS {
+                    return Ok(());
+                }
             }
         }
         self.force_flush()?;
@@ -121,7 +123,6 @@ impl Filesystem {
 
     fn flush_cache(&mut self) -> Result<(), Error> {
         debug!("Flushing cache to disk");
-        self.cache.prune()?;
         for inode in self.cache.inodes.values_mut() {
             if inode.modified {
                 inode.value.flush(&mut self.device, &self.superblock)?;
@@ -134,6 +135,7 @@ impl Filesystem {
                 block.modified = false;
             }
         }
+        self.cache.prune()?;
         Ok(())
     }
 
