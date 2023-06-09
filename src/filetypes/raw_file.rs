@@ -122,7 +122,10 @@ impl RawByteFile {
         }
         // Previous write filled last block and moved cursor to a
         // nonexistent next block
-        if self.cursor.position() % self.cursor.padded_block() == 0 && self.size > 0 {
+        if self.size > 0
+            && self.cursor.position() % self.cursor.padded_block() == 0
+            && self.cursor.position() == self.size
+        {
             self.append_block()?;
         }
         let mut current_block = self.get_nth_block(self.cursor.block())?;
@@ -292,9 +295,7 @@ impl RawByteFile {
         };
         let mut file = Self::load(fs, inode)?;
         file.shrink(0)?;
-        let mut fs_handle = fs.lock()?;
         assert_eq!(file.first_block, NULL_BLOCK);
-        fs_handle.release_inode(inode.index)?;
         Ok(())
     }
 

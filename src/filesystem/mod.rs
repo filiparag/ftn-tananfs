@@ -171,7 +171,6 @@ impl Filesystem {
                 return Err(Error::OutOfMemory);
             }
             debug!("Acquire block {index}");
-            warn!("ACQUIRE BLOCK {index}");
             self.superblock.blocks_free -= 1;
             self.blocks.set(index, true)?;
             self.flush()?;

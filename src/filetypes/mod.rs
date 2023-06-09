@@ -30,6 +30,8 @@ pub struct RawByteFile {
 pub struct RegularFile {
     pub(crate) inode: Inode,
     pub(crate) file: RawByteFile,
+    pub(crate) modified: bool,
+    pub(crate) removed: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -39,11 +41,19 @@ pub struct DirectoryChild {
 }
 
 #[derive(Debug, Clone)]
+pub enum DirectoryChildIdentifier<'a> {
+    Name(&'a str),
+    Inode(u64),
+}
+
+#[derive(Debug, Clone)]
 pub struct Directory {
     pub(crate) inode: Inode,
     pub(crate) file: RawByteFile,
     pub(crate) name: String,
     pub(crate) children: Vec<DirectoryChild>,
+    pub(crate) modified: bool,
+    pub(crate) removed: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -53,4 +63,14 @@ pub struct BlockCursor {
     pub(crate) block_padding_back: usize,
     pub(crate) current_block: u64,
     pub(crate) current_byte: usize,
+}
+
+pub trait FileOperations
+where
+    Self: Sized,
+{
+    fn new(fs: &Arc<Mutex<Filesystem>>, parent: u64, name: &str, mode: u32) -> Result<Self, Error>;
+    fn load(fs: &Arc<Mutex<Filesystem>>, index: u64) -> Result<Self, Error>;
+    fn flush(&mut self) -> Result<(), Error>;
+    fn remove(self) -> Result<(), Error>;
 }

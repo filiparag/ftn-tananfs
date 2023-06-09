@@ -6,7 +6,6 @@ use std::{
 
 use crate::{
     error::Error,
-    filetypes::RawByteFile,
     structs::{Block, Inode, PermanentIndexed},
 };
 
@@ -16,7 +15,6 @@ use super::{Filesystem, LRU_MAX_ENTRIES};
 pub struct Cache {
     pub(super) inodes: BTreeMap<u64, CacheLine<Inode>>,
     pub(super) blocks: BTreeMap<u64, CacheLine<Block>>,
-    pub(super) raw_byte_files: BTreeMap<u64, CacheLine<RawByteFile>>,
 }
 
 #[derive(Debug)]

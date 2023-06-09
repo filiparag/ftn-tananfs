@@ -1,12 +1,11 @@
 use fuser::FileType;
 use log::{debug, error, info};
-use std::{io::Seek, time::Duration};
+use std::time::Duration;
 
 use crate::{
     error::Error,
-    filetypes::{Directory, RawByteFile, RegularFile},
+    filetypes::{Directory, FileOperations, RegularFile},
 };
-
 
 use super::FuseFs;
 
@@ -113,27 +112,18 @@ impl fuser::Filesystem for FuseFs {
         let inner = || -> Result<(), Error> {
             let mut dir = Directory::load(&self.filesystem, parent)?;
             let name = name.to_str().unwrap();
-            for (index, child) in dir.children.iter().enumerate() {
-                if name != child.name {
-                    continue;
-                }
-                let inode = self.fs_handle()?.load_inode(child.inode)?;
-                debug!("Matched child inode {}", child.inode);
-                let mut file = RawByteFile::load(&self.filesystem, inode)?;
-                file.shrink(0)?;
-                self.fs_handle()?.release_block(inode.first_block)?;
-                self.fs_handle()?.release_inode(inode.index)?;
-                dir.children.remove(index);
-                debug!("Removed file with index {index}");
+            if let Err(e) = dir.remove_child(crate::filetypes::DirectoryChildIdentifier::Name(name))
+            {
+                error!("Error: {e}");
+                reply.error(e.into());
+                Ok(())
+            } else {
+                reply.ok();
                 dir.flush()?;
                 debug!("Parent directory flushed");
-                reply.ok();
                 debug!("Success");
-                return Ok(());
+                Ok(())
             }
-            error!("Directory not found");
-            reply.error(libc::ENOENT);
-            Ok(())
         };
         inner().unwrap_or_else(|e| error!("Error: {e}"));
     }
@@ -206,28 +196,9 @@ impl fuser::Filesystem for FuseFs {
             } else {
                 file.file.shrink(new_size as u64)?;
             }
+            file.modified = true;
             file.inode.mode = mode as u16;
             reply.ok();
-            debug!("Success");
-            Ok(())
-        };
-        inner().unwrap_or_else(|e| error!("Error: {e}"));
-    }
-
-    fn lseek(
-        &mut self,
-        _req: &fuser::Request<'_>,
-        ino: u64,
-        _fh: u64,
-        offset: i64,
-        _whence: i32,
-        reply: fuser::ReplyLseek,
-    ) {
-        info!("Seek file {ino:?} to offset {offset}");
-        let inner = || -> Result<(), Error> {
-            let mut file = RegularFile::load(&self.filesystem, ino)?;
-            file.file.seek(std::io::SeekFrom::Current(offset))?;
-            reply.offset(offset);
             debug!("Success");
             Ok(())
         };
@@ -346,10 +317,8 @@ impl fuser::Filesystem for FuseFs {
     ) {
         info!("Make node {name:?} in parent directory {parent}");
         let inner = || -> Result<(), Error> {
-            let mut dir = Directory::load(&self.filesystem, parent)?;
             let name = name.to_str().unwrap();
-            let file = RegularFile::new(&self.filesystem, parent, mode)?;
-            dir.add_child(name, file.inode.index)?;
+            let file = RegularFile::new(&self.filesystem, parent, name, mode)?;
             reply.entry(
                 &Duration::from_secs(0),
                 &file.inode.attrs(&self.fs_handle()?.superblock),
@@ -372,10 +341,8 @@ impl fuser::Filesystem for FuseFs {
     ) {
         info!("Make directory {name:?} in parent directory {parent}");
         let inner = || -> Result<(), Error> {
-            let mut parent = Directory::load(&self.filesystem, parent)?;
             let name = name.to_str().unwrap();
-            let dir = Directory::new(&self.filesystem, parent.inode.index, name, mode)?;
-            parent.add_child(name, dir.inode.index)?;
+            let dir = Directory::new(&self.filesystem, parent, name, mode)?;
             reply.entry(
                 &Duration::from_secs(0),
                 &dir.inode.attrs(&self.fs_handle()?.superblock),
@@ -398,7 +365,7 @@ impl fuser::Filesystem for FuseFs {
         let inner = || -> Result<(), Error> {
             let mut dir = Directory::load(&self.filesystem, parent)?;
             let name = name.to_str().unwrap();
-            match dir.remove_child(name) {
+            match dir.remove_child(crate::filetypes::DirectoryChildIdentifier::Name(&name)) {
                 Err(e) => reply.error(e.into()),
                 Ok(_) => {
                     reply.ok();
@@ -431,35 +398,21 @@ impl fuser::Filesystem for FuseFs {
     ) {
         info!("Rename {name:?} to {newname:?}");
         let inner = || -> Result<(), Error> {
-            if newparent == parent {
-                let mut dir = Directory::load(&self.filesystem, newparent)?;
-                let name = name.to_str().unwrap();
-                debug!("Renaming file inside same parent {parent}");
-                if let Some(index) = dir.children.iter().position(|e| e.name == name) {
-                    dir.children[index].name = String::from(newname.to_str().unwrap());
-                    debug!("Success");
-                    reply.ok();
-                    return Ok(());
-                } else {
-                    reply.error(libc::ENOENT);
-                    return Err(Error::NotFound);
-                }
-            }
-            debug!("Moving file from parent {parent} to {newparent}");
-            let mut old_dir = Directory::load(&self.filesystem, parent)?;
-            let mut new_dir = Directory::load(&self.filesystem, newparent)?;
             let name = name.to_str().unwrap();
             let new_name = newname.to_str().unwrap();
-            if let Some(index) = old_dir.children.iter().position(|e| e.name == name) {
-                let inode = old_dir.children[index].inode;
-                new_dir.add_child(&new_name, inode)?;
-                old_dir.children.remove(index);
-                debug!("Success");
-                reply.ok();
-                Ok(())
-            } else {
-                reply.error(libc::ENOENT);
-                Err(Error::NotFound)
+            match Directory::load(&self.filesystem, parent)?.transfer_child(
+                crate::filetypes::DirectoryChildIdentifier::Name(name),
+                newparent,
+                new_name,
+            ) {
+                Ok(_) => {
+                    reply.ok();
+                    Ok(())
+                }
+                Err(_) => {
+                    reply.error(libc::ENOENT);
+                    Err(Error::NotFound)
+                }
             }
         };
         inner().unwrap_or_else(|e| error!("Error: {e}"));
