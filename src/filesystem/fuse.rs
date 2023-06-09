@@ -1,5 +1,5 @@
 use fuser::FileType;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use std::time::Duration;
 
 use crate::{
@@ -25,7 +25,7 @@ impl fuser::Filesystem for FuseFs {
                 "Skipped inode 0, current is {}",
                 self.fs_handle()?.inodes.next_free(0).unwrap()
             );
-            let _ = Directory::new(&self.filesystem, ROOT_INODE, "root", 0o750)?;
+            Directory::new(&self.filesystem, ROOT_INODE, "root", 0o750)?;
             info!("Root directory created");
         }
         self.fs_handle()?.force_flush()?;
@@ -49,26 +49,34 @@ impl fuser::Filesystem for FuseFs {
     ) {
         info!("Reading directory {ino} with offset {offset}");
         let inner = || -> Result<(), Error> {
-            let dir = Directory::load(&self.filesystem, ino)?;
-            if offset == 0 {
-                let parent = dir.inode.metadata[0];
-                let _ = reply.add(ino, 0, fuser::FileType::Directory, ".");
-                let _ = reply.add(parent, 1, fuser::FileType::Directory, "..");
-                debug!("Listed parent and self inode");
-            }
-            for (index, child) in dir.children.iter().skip(offset as usize).enumerate() {
-                let inode = self.fs_handle()?.load_inode(ino)?;
-                debug!("Listed child inode {}", child.name);
-                if reply.add(ino, offset + index as i64 + 3, inode.r#type, &child.name) {
-                    debug!("Buffer full");
-                    break;
+            match Directory::load(&self.filesystem, ino) {
+                Ok(dir) => {
+                    if offset == 0 {
+                        let parent = dir.inode.metadata[0];
+                        let _ = reply.add(ino, 0, fuser::FileType::Directory, ".");
+                        let _ = reply.add(parent, 1, fuser::FileType::Directory, "..");
+                        debug!("Listed parent and self inode");
+                    }
+                    for (index, child) in dir.children.iter().skip(offset as usize).enumerate() {
+                        let inode = self.fs_handle()?.load_inode(ino)?;
+                        debug!("Listed child inode {}", child.name);
+                        if reply.add(ino, offset + index as i64 + 3, inode.r#type, &child.name) {
+                            debug!("Buffer full");
+                            break;
+                        }
+                    }
+                    reply.ok();
+                    debug!("Success");
+                    Ok(())
+                }
+                Err(e) => {
+                    warn!("Error: {e}");
+                    reply.error(e.into());
+                    Ok(())
                 }
             }
-            reply.ok();
-            debug!("Success");
-            Ok(())
         };
-        inner().unwrap_or_else(|e| error!("Error: {e}"));
+        inner().unwrap_or_else(|e| error!("Unexpected error: {e}"));
     }
 
     fn lookup(
@@ -82,22 +90,24 @@ impl fuser::Filesystem for FuseFs {
         let inner = || -> Result<(), Error> {
             let dir = Directory::load(&self.filesystem, parent)?;
             let name = name.to_string_lossy();
-            for child in &dir.children {
-                if name != child.name {
-                    continue;
+            match dir.get_child_inode(crate::filetypes::DirectoryChildIdentifier::Name(&name)) {
+                Ok(child) => {
+                    drop(dir);
+                    let inode = self.fs_handle()?.load_inode(child)?;
+                    let attrs = inode.attrs(&self.fs_handle()?.superblock);
+                    reply.entry(&Duration::from_secs(0), &attrs, 0);
+                    debug!("Loaded attributes");
+                    debug!("Success");
+                    Ok(())
                 }
-                let inode = self.fs_handle()?.load_inode(child.inode)?;
-                debug!("Matched child inode {}", child.inode);
-                let attrs = inode.attrs(&self.fs_handle()?.superblock);
-                reply.entry(&Duration::from_secs(0), &attrs, 0);
-                debug!("Loaded attributes");
-                debug!("Success");
-                return Ok(());
+                Err(e) => {
+                    warn!("Error: {e}");
+                    reply.error(e.into());
+                    Ok(())
+                }
             }
-            reply.error(libc::ENOENT);
-            Err(Error::NotFound)
         };
-        inner().unwrap_or_else(|e| error!("Error: {e}"));
+        inner().unwrap_or_else(|e| error!("Unexpected error: {e}"));
     }
 
     fn rmdir(
@@ -113,18 +123,16 @@ impl fuser::Filesystem for FuseFs {
             let name = name.to_str().unwrap();
             if let Err(e) = dir.remove_child(crate::filetypes::DirectoryChildIdentifier::Name(name))
             {
-                error!("Error: {e}");
+                warn!("Error: {e}");
                 reply.error(e.into());
                 Ok(())
             } else {
                 reply.ok();
-                dir.flush()?;
-                debug!("Parent directory flushed");
                 debug!("Success");
                 Ok(())
             }
         };
-        inner().unwrap_or_else(|e| error!("Error: {e}"));
+        inner().unwrap_or_else(|e| error!("Unexpected error: {e}"));
     }
 
     fn read(
@@ -140,13 +148,21 @@ impl fuser::Filesystem for FuseFs {
     ) {
         info!("Read {size} bytes from file {ino:?} with offset {offset}");
         let inner = || -> Result<(), Error> {
-            let mut file = RegularFile::load(&self.filesystem, ino)?;
-            let data = file.read(offset as u64, size as u64)?;
-            reply.data(&data);
-            debug!("Success");
-            Ok(())
+            match RegularFile::load(&self.filesystem, ino) {
+                Ok(mut file) => {
+                    let data = file.read(offset as u64, size as u64)?;
+                    reply.data(&data);
+                    debug!("Success");
+                    Ok(())
+                }
+                Err(e) => {
+                    warn!("Error: {e}");
+                    reply.error(e.into());
+                    Ok(())
+                }
+            }
         };
-        inner().unwrap_or_else(|e| error!("Error: {e}"));
+        inner().unwrap_or_else(|e| error!("Unexpected error: {e}"));
     }
 
     fn write(
@@ -166,13 +182,21 @@ impl fuser::Filesystem for FuseFs {
             data.len()
         );
         let inner = || -> Result<(), Error> {
-            let mut file = RegularFile::load(&self.filesystem, ino)?;
-            file.write(offset as u64, data)?;
-            reply.written(data.len() as u32);
-            debug!("Success");
-            Ok(())
+            match RegularFile::load(&self.filesystem, ino) {
+                Ok(mut file) => {
+                    file.write(offset as u64, data)?;
+                    reply.written(data.len() as u32);
+                    debug!("Success");
+                    Ok(())
+                }
+                Err(e) => {
+                    warn!("Error: {e}");
+                    reply.error(e.into());
+                    Ok(())
+                }
+            }
         };
-        inner().unwrap_or_else(|e| error!("Error: {e}"));
+        inner().unwrap_or_else(|e| error!("Unexpected error: {e}"));
     }
 
     fn fallocate(
@@ -187,33 +211,48 @@ impl fuser::Filesystem for FuseFs {
     ) {
         info!("Allocate {length} bytes in file {ino:?} at offset {offset}");
         let inner = || -> Result<(), Error> {
-            let mut file = RegularFile::load(&self.filesystem, ino)?;
-            let size = file.file.size as i64;
-            let new_size = size - offset + length;
-            if new_size > size {
-                file.file.extend(new_size as u64)?;
-            } else {
-                file.file.shrink(new_size as u64)?;
+            match RegularFile::load(&self.filesystem, ino) {
+                Ok(mut file) => {
+                    let size = file.file.size as i64;
+                    let new_size = size - offset + length;
+                    if new_size > size {
+                        file.file.extend(new_size as u64)?;
+                    } else {
+                        file.file.shrink(new_size as u64)?;
+                    }
+                    file.modified = true;
+                    file.inode.mode = mode as u16;
+                    reply.ok();
+                    debug!("Success");
+                    Ok(())
+                }
+                Err(e) => {
+                    warn!("Error: {e}");
+                    reply.error(e.into());
+                    Ok(())
+                }
             }
-            file.modified = true;
-            file.inode.mode = mode as u16;
-            reply.ok();
-            debug!("Success");
-            Ok(())
         };
-        inner().unwrap_or_else(|e| error!("Error: {e}"));
+        inner().unwrap_or_else(|e| error!("Unexpected error: {e}"));
     }
 
     fn getattr(&mut self, _req: &fuser::Request<'_>, ino: u64, reply: fuser::ReplyAttr) {
         info!("Get attributes for inode {ino}");
         let inner = || -> Result<(), Error> {
-            let inode = self.fs_handle()?.load_inode(ino)?;
+            let inode = match self.fs_handle()?.load_inode(ino) {
+                Ok(inode) => inode,
+                Err(e) => {
+                    warn!("Error: {e}");
+                    reply.error(e.into());
+                    return Ok(());
+                }
+            };
             let attrs = inode.attrs(&self.fs_handle()?.superblock);
             reply.attr(&Duration::from_secs(0), &attrs);
             debug!("Success");
             Ok(())
         };
-        inner().unwrap_or_else(|e| error!("Error: {e}"));
+        inner().unwrap_or_else(|e| error!("Unexpected error: {e}"));
     }
 
     fn setattr(
@@ -236,7 +275,14 @@ impl fuser::Filesystem for FuseFs {
     ) {
         info!("Set attributes for inode {ino}");
         let inner = || -> Result<(), Error> {
-            let mut inode = self.fs_handle()?.load_inode(ino)?;
+            let mut inode = match self.fs_handle()?.load_inode(ino) {
+                Ok(inode) => inode,
+                Err(e) => {
+                    warn!("Error: {e}");
+                    reply.error(e.into());
+                    return Ok(());
+                }
+            };
             if let Some(mode) = mode {
                 debug!("Setting mode to {mode:0o}");
                 inode.mode = mode as u16;
@@ -261,24 +307,32 @@ impl fuser::Filesystem for FuseFs {
             debug!("Success");
             Ok(())
         };
-        inner().unwrap_or_else(|e| error!("Error: {e}"));
+        inner().unwrap_or_else(|e| error!("Unexpected error: {e}"));
     }
 
     fn open(&mut self, _req: &fuser::Request<'_>, ino: u64, _flags: i32, reply: fuser::ReplyOpen) {
         info!("Open file {ino}");
         let inner = || -> Result<(), Error> {
-            let inode = self.fs_handle()?.load_inode(ino)?;
-            if inode.r#type == FileType::RegularFile {
-                reply.opened(0, fuser::consts::FOPEN_DIRECT_IO);
-                debug!("Success");
-                Ok(())
-            } else {
-                reply.error(libc::EACCES);
-                error!("Not found");
-                Err(Error::NotFound)
+            match self.fs_handle()?.load_inode(ino) {
+                Ok(inode) => {
+                    if inode.r#type == FileType::RegularFile {
+                        reply.opened(0, fuser::consts::FOPEN_DIRECT_IO);
+                        debug!("Success");
+                        Ok(())
+                    } else {
+                        warn!("Unable to open non-regular file");
+                        reply.error(libc::EACCES);
+                        Ok(())
+                    }
+                }
+                Err(e) => {
+                    warn!("Error: {e}");
+                    reply.error(e.into());
+                    Ok(())
+                }
             }
         };
-        inner().unwrap_or_else(|e| error!("Error: {e}"));
+        inner().unwrap_or_else(|e| error!("Unexpected error: {e}"));
     }
 
     fn opendir(
@@ -290,18 +344,26 @@ impl fuser::Filesystem for FuseFs {
     ) {
         info!("Open directory {ino}");
         let inner = || -> Result<(), Error> {
-            let inode = self.fs_handle()?.load_inode(ino)?;
-            if inode.r#type == FileType::Directory {
-                reply.opened(0, fuser::consts::FOPEN_DIRECT_IO);
-                debug!("Success");
-                Ok(())
-            } else {
-                reply.error(libc::EACCES);
-                error!("Not found");
-                Err(Error::NotFound)
+            match self.fs_handle()?.load_inode(ino) {
+                Ok(inode) => {
+                    if inode.r#type == FileType::Directory {
+                        reply.opened(0, fuser::consts::FOPEN_DIRECT_IO);
+                        debug!("Success");
+                        Ok(())
+                    } else {
+                        warn!("Unable to open file as a directory");
+                        reply.error(libc::EACCES);
+                        Ok(())
+                    }
+                }
+                Err(e) => {
+                    warn!("Error: {e}");
+                    reply.error(e.into());
+                    Ok(())
+                }
             }
         };
-        inner().unwrap_or_else(|e| error!("Error: {e}"));
+        inner().unwrap_or_else(|e| error!("Unexpected error: {e}"));
     }
 
     fn mknod(
@@ -317,16 +379,24 @@ impl fuser::Filesystem for FuseFs {
         info!("Make node {name:?} in parent directory {parent}");
         let inner = || -> Result<(), Error> {
             let name = name.to_str().unwrap();
-            let file = RegularFile::new(&self.filesystem, parent, name, mode)?;
-            reply.entry(
-                &Duration::from_secs(0),
-                &file.inode.attrs(&self.fs_handle()?.superblock),
-                0,
-            );
-            debug!("Success");
-            Ok(())
+            match RegularFile::new(&self.filesystem, parent, name, mode) {
+                Ok(file) => {
+                    reply.entry(
+                        &Duration::from_secs(0),
+                        &file.inode.attrs(&self.fs_handle()?.superblock),
+                        0,
+                    );
+                    debug!("Success");
+                    Ok(())
+                }
+                Err(e) => {
+                    warn!("Error: {e}");
+                    reply.error(e.into());
+                    Ok(())
+                }
+            }
         };
-        inner().unwrap_or_else(|e| error!("Error: {e}"));
+        inner().unwrap_or_else(|e| error!("Unexpected error: {e}"));
     }
 
     fn mkdir(
@@ -341,16 +411,24 @@ impl fuser::Filesystem for FuseFs {
         info!("Make directory {name:?} in parent directory {parent}");
         let inner = || -> Result<(), Error> {
             let name = name.to_str().unwrap();
-            let dir = Directory::new(&self.filesystem, parent, name, mode)?;
-            reply.entry(
-                &Duration::from_secs(0),
-                &dir.inode.attrs(&self.fs_handle()?.superblock),
-                0,
-            );
-            debug!("Success");
-            Ok(())
+            match Directory::new(&self.filesystem, parent, name, mode) {
+                Ok(dir) => {
+                    reply.entry(
+                        &Duration::from_secs(0),
+                        &dir.inode.attrs(&self.fs_handle()?.superblock),
+                        0,
+                    );
+                    debug!("Success");
+                    Ok(())
+                }
+                Err(e) => {
+                    warn!("Error: {e}");
+                    reply.error(e.into());
+                    Ok(())
+                }
+            }
         };
-        inner().unwrap_or_else(|e| error!("Error: {e}"));
+        inner().unwrap_or_else(|e| error!("Unexpected error: {e}"));
     }
 
     fn unlink(
@@ -362,18 +440,26 @@ impl fuser::Filesystem for FuseFs {
     ) {
         info!("Unlink {name:?} from parent directory {parent}");
         let inner = || -> Result<(), Error> {
-            let mut dir = Directory::load(&self.filesystem, parent)?;
             let name = name.to_str().unwrap();
-            match dir.remove_child(crate::filetypes::DirectoryChildIdentifier::Name(&name)) {
-                Err(e) => reply.error(e.into()),
-                Ok(_) => {
-                    reply.ok();
-                    debug!("Success");
+            match Directory::load(&self.filesystem, parent) {
+                Ok(mut dir) => {
+                    match dir.remove_child(crate::filetypes::DirectoryChildIdentifier::Name(name)) {
+                        Err(e) => reply.error(e.into()),
+                        Ok(_) => {
+                            reply.ok();
+                            debug!("Success");
+                        }
+                    }
+                    Ok(())
+                }
+                Err(e) => {
+                    warn!("Error: {e}");
+                    reply.error(e.into());
+                    Ok(())
                 }
             }
-            Ok(())
         };
-        inner().unwrap_or_else(|e| error!("Error: {e}"));
+        inner().unwrap_or_else(|e| error!("Unexpected error: {e}"));
     }
 
     fn destroy(&mut self) {
@@ -382,7 +468,7 @@ impl fuser::Filesystem for FuseFs {
             self.fs_handle()?.force_flush()?;
             Ok(())
         };
-        inner().unwrap_or_else(|e| error!("Error: {e}"));
+        inner().unwrap_or_else(|e| error!("Unexpected error: {e}"));
     }
 
     fn rename(
@@ -404,17 +490,18 @@ impl fuser::Filesystem for FuseFs {
                 newparent,
                 new_name,
             ) {
-                Ok(_) => {
+                Ok(()) => {
                     reply.ok();
                     Ok(())
                 }
-                Err(_) => {
-                    reply.error(libc::ENOENT);
-                    Err(Error::NotFound)
+                Err(e) => {
+                    warn!("Error: {e}");
+                    reply.error(e.into());
+                    Ok(())
                 }
             }
         };
-        inner().unwrap_or_else(|e| error!("Error: {e}"));
+        inner().unwrap_or_else(|e| error!("Unexpected error: {e}"));
     }
 
     fn flush(
@@ -439,7 +526,7 @@ impl fuser::Filesystem for FuseFs {
             }
             Ok(())
         };
-        inner().unwrap_or_else(|e| error!("Error: {e}"));
+        inner().unwrap_or_else(|e| error!("Unexpected error: {e}"));
     }
 
     fn fsync(
@@ -464,7 +551,7 @@ impl fuser::Filesystem for FuseFs {
             }
             Ok(())
         };
-        inner().unwrap_or_else(|e| error!("Error: {e}"));
+        inner().unwrap_or_else(|e| error!("Unexpected error: {e}"));
     }
 
     fn statfs(&mut self, _req: &fuser::Request<'_>, _ino: u64, reply: fuser::ReplyStatfs) {
@@ -484,6 +571,6 @@ impl fuser::Filesystem for FuseFs {
             );
             Ok(())
         };
-        inner().unwrap_or_else(|e| error!("Error: {e}"));
+        inner().unwrap_or_else(|e| error!("Unexpected error: {e}"));
     }
 }
