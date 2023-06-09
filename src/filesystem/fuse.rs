@@ -519,15 +519,16 @@ impl fuser::Filesystem for FuseFs {
         info!("Get filesystem statistics");
         let inner = || -> Result<(), Error> {
             let spb = &self.fs_handle()?.superblock;
+            let padded_block_size = spb.block_size - 8;
             reply.statfs(
                 spb.block_count,
                 spb.blocks_free,
                 spb.blocks_free,
                 spb.inode_count - spb.inodes_free,
                 spb.inodes_free,
-                spb.block_size,
+                padded_block_size,
                 u16::MAX as u32,
-                spb.block_size,
+                padded_block_size,
             );
             Ok(())
         };
