@@ -14,7 +14,7 @@ pub use bitmap::*;
 
 pub const METADATA_IN_INODE: usize = 5;
 pub const DATA_PER_INODE: u64 = 4096;
-pub const MAGIC_SIGNATURE: u16 = 0x4650;
+pub const MAGIC_SIGNATURE: u64 = 0x2153466E616E6154;
 pub const NULL_BLOCK: u64 = u64::MAX;
 pub const DEFAULT_BLOCK_SIZE: u32 = 4096;
 
@@ -50,9 +50,9 @@ pub struct Superblock {
     #[doc(hidden)]
     pub(crate) __padding_1: [u8; 20],
     /// Magic signature
-    pub(crate) magic: u16,
+    pub(crate) magic: u64,
     #[doc(hidden)]
-    pub(crate) __padding_2: [u8; 966],
+    pub(crate) __padding_2: [u8; 960],
 }
 
 #[derive(Debug, Clone, Copy)]

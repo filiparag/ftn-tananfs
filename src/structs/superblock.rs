@@ -20,7 +20,7 @@ impl Superblock {
             block_size,
             __padding_1: [0; 20],
             magic: MAGIC_SIGNATURE,
-            __padding_2: [0; 966],
+            __padding_2: [0; 960],
         }
     }
 

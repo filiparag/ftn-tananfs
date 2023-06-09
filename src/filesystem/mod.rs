@@ -48,7 +48,7 @@ impl FuseFs {
 impl Filesystem {
     pub(crate) fn new(device: Box<dyn BlockDevice>, capacity: u64, block_size: u32) -> Self {
         let superblock = Superblock::new(capacity, block_size);
-        assert!(block_size.is_power_of_two() && (512..=8192).contains(&block_size));
+        assert!(block_size.is_power_of_two() && (512..=4096).contains(&block_size));
         Self {
             superblock,
             inodes: Bitmap::<Inode>::new(&superblock),
@@ -61,12 +61,12 @@ impl Filesystem {
 
     /// Returns block size of an existing filesystem on `device` by checking magic signature
     pub(crate) fn detect_existing(device: &mut dyn BlockDevice) -> Result<Option<u32>, Error> {
-        for pow in 9..=13 {
+        for pow in 9..=12 {
             let block_size = u64::pow(2, pow);
             device.seek(std::io::SeekFrom::Start(block_size + 0x38))?;
-            let mut buffer = [0u8; 2];
+            let mut buffer = [0u8; 8];
             device.read_exact(&mut buffer)?;
-            if u16::from_le_bytes(buffer) == MAGIC_SIGNATURE {
+            if u64::from_le_bytes(buffer) == MAGIC_SIGNATURE {
                 info!("Detected existing filesystem with block size {block_size}");
                 return Ok(Some(block_size as u32));
             }
