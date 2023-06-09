@@ -1,5 +1,6 @@
 use super::{helpers::*, DirectoryChildIdentifier, FileOperations, RawByteFile, RegularFile};
 use super::{Directory, DirectoryChild};
+use crate::filesystem::ROOT_INODE;
 use crate::structs::{Inode, NULL_BLOCK};
 use crate::{Error, Filesystem};
 
@@ -12,7 +13,7 @@ impl Directory {
         Ok(match child {
             DirectoryChildIdentifier::Name(name) => {
                 match self.children.iter().find(|c| c.name == name) {
-                    Some(&ref child) => child.inode,
+                    Some(child) => child.inode,
                     None => return Err(Error::NotFound),
                 }
             }
@@ -42,7 +43,7 @@ impl Directory {
     pub fn remove_empty(mut self) -> Result<(), Error> {
         let index = self.inode.index;
         debug!("Remove empty directory {} with inode {index}", self.name);
-        if self.children.len() != 0 {
+        if !self.children.is_empty() {
             return Err(Error::DirectoryNotEmpty);
         }
         RawByteFile::remove(&self.file.filesystem, self.inode.index)?;
@@ -106,7 +107,11 @@ impl FileOperations for Directory {
         let inode = fs.lock()?.acquire_inode()?;
         let children_count = 0u64;
         let file = RawByteFile::new(fs)?;
-        Directory::load(&fs, parent)?.add_child(name, inode)?;
+        if parent == ROOT_INODE && inode == ROOT_INODE {
+            debug!("Root directory, skip adding to parent");
+        } else {
+            Directory::load(fs, parent)?.add_child(name, inode)?;
+        }
         Ok(Self {
             inode: Inode {
                 index: inode,

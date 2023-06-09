@@ -50,7 +50,7 @@ impl FileOperations for RegularFile {
         let now = timestamp_now();
         let inode = fs.lock()?.acquire_inode()?;
         let file = RawByteFile::new(fs)?;
-        Directory::load(&fs, parent)?.add_child(name, inode)?;
+        Directory::load(fs, parent)?.add_child(name, inode)?;
         Ok(Self {
             inode: Inode {
                 index: inode,

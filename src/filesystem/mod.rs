@@ -3,7 +3,7 @@ use std::io::{Read, Seek, Write};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use log::{debug, info, warn};
+use log::{debug, info};
 
 use crate::structs::*;
 use crate::Error;
@@ -19,6 +19,8 @@ impl BlockDevice for std::fs::File {}
 
 pub const DIRTY_PAGE_MAX_SECONDS: Duration = Duration::from_millis(1000);
 pub const LRU_MAX_ENTRIES: usize = 131072;
+pub const ROOT_INODE: u64 = 1;
+pub const FORCE_FLUSH_ALWAYS: bool = false;
 
 #[derive(Debug)]
 pub struct Filesystem {
@@ -98,7 +100,7 @@ impl Filesystem {
     pub(crate) fn flush(&mut self) -> Result<(), Error> {
         debug!("Invoking filesystem flush");
         if let Some(last) = self.last_flush {
-            if Instant::now().duration_since(last) < DIRTY_PAGE_MAX_SECONDS {
+            if !FORCE_FLUSH_ALWAYS || Instant::now().duration_since(last) < DIRTY_PAGE_MAX_SECONDS {
                 return Ok(());
             }
         }

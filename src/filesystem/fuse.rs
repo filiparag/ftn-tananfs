@@ -4,12 +4,11 @@ use std::time::Duration;
 
 use crate::{
     error::Error,
+    filesystem::ROOT_INODE,
     filetypes::{Directory, FileOperations, RegularFile},
 };
 
 use super::FuseFs;
-
-const ROOT_INODE: u64 = 1;
 
 impl fuser::Filesystem for FuseFs {
     fn init(
