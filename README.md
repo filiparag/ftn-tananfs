@@ -1,18 +1,3 @@
----
-title: Primer realizacije _FUSE_ fajlsistema
-subtitle: Ispitni rad iz predmeta Operativni sistemi
-author: Filip Parag
-date: 12. jun 2023.
-papersize: A4
-output:
-  pdf_document:
----
-
-
-**Student**: Filip Parag, RA 122/2018
-
-**Mentor**: dr Veljko Petrović
-
 # TananFS
 
 _TananFS_ je edukativni fajlsistem napravljen sa ciljem da ima malo metapodataka, a istovremeno velike gornje granice za imena i veličine datoteka.
@@ -42,8 +27,6 @@ Superblok je struktura koja sadrži sve podatke neophodne za učitavanje postoje
 | 32       | `u32` | veličina bloka      |
 | 56       | `u64` | magični broj        |
 
-: Polja strukture Superblok
-
 Veličina bloka je stepen dvojke u opsegu od 512 do 4096 bajta i preporučljivo je da se poklapa sa veličinom sektora diska, jer u suprotnom dolazi smaknutih upisivanja i čitanja koja umanjuju performanse i potencijalno smanjuju životni vek fleš memorije. U ovom tekstu se podrazumeva da su veličina sektora i bloka istovetne.
 
 Magični broj je torka bajtova `0x54616E616E465321` koja služi za otkrivanje postojećeg fajlsistema. Pri pokretanju programa, magični broj se traži za svaku potencijalnu veličinu bloka, i ukoliko biva pronađen, postojeći fajlsistem se učitava, a u suprotnom se kreira novi fajlsistem tako da zauzme ceo disk.
@@ -71,8 +54,6 @@ Zauzimanje polja ide sekvencijalno, odnosno uvek se traži prvo slobodno polje. 
 
 Ovakvo zauzimanje dovodi do neželjenog spoljnog parčanja slobodnog prostora pri čestom brisanju i smanjivanju datoteka, ali to ne predstavlja preveliki problem na poluprovodničkim diskovima koji nisu elektromehaničke ili optičke prirode.
 
-\pagebreak
-
 ### Inoda
 
 Inoda je struktura fiksne veličine za čuvanje svih metapodataka datoteke i sadrži sve izuzev imena, koje je proizvoljne dužine:
@@ -94,15 +75,11 @@ Inoda je struktura fiksne veličine za čuvanje svih metapodataka datoteke i sad
 | 112      | `u64`      | redni broj prvog bloka              |
 | 120      | `u64`      | redni broj poslednjeg bloka         |
 
-: Polja strukture Inoda
-
 ### Blok
 
 Blok je komad proizvoljnih bajtova unapred poznate veličine i služi za čuvanje podataka i metapodataka promenljive veličine.
 
 Broj inoda je manji ili jednak broju blokova, jer se po jednoj datoteci zauzima tačno jedna inoda, a broj blokova je promenljiv. Nezavisno od veličine bloka, za svaka 4 kibibajta se na disku zauzima po jedna inoda, pod pretpostavkom da većina datoteka ne zauzima manje od te veličine.
-
-\pagebreak
 
 ### Datoteka bajta
 
@@ -127,8 +104,6 @@ Zbog neporavnatosti stvarnih i logičkih mesta bajtova, programi koji sarađuju 
 **Čitanje iz datoteke**
 
 Funkciji za čitanje iz datoteke se prosleđuje promenljiva referenca niza bajtova proizvoljne veličine. Ukoliko je od trenutnog mesta kursora do kraja datoteke ostalo manje bajta od veličine niza, vraća se greška, a u suprotnom se sa diska redom učitavaju blokovi i njihov sadržaj se prepisuje u niz. Kursor se tokom čitanja pomera, tako da dva uzastopna poziva ove funkcije vraćaju uzastopne delove datoteke.
-
-\pagebreak
 
 **Pisanje u datoteku**
 
@@ -166,8 +141,6 @@ Dok je direktorijum učitan, kopija podataka o potomcima se čuva u radnoj memor
 
 Datoteka je takođe par inode i datoteke bajtova, ali je njen sadržaj potpuno proizvoljan. Svaka datoteka može pripadati jednom direktorijumu, čiji broj čuva u prvom polju inode za metapodatke. Metapodaci o vremenu pristupa, izrade i izmene se i kod direktorijuma i kod datoteke ažuriraju pri svakoj od ovih radnji.
 
-\pagebreak
-
 ### Fajlsistem
 
 Fajlsistem je struktura koja povezuje različite nivoe apstrakcije - s jedne strane vodi zapisnik o zauzeću i stanju svakog bajta, a s druge strane korisnicima daje organizaciju podataka u datoteke i direktorijume koji su izmišljeni za lakši rad na računaru, ali sami po sebi ne postoje na disku.
@@ -183,8 +156,6 @@ Pisanje struktura na disk takođe prolazi kroz keš - svaki put kada se zahteva 
 Redosled pisanja na disk ne poštuje princip lokalnosti - donekle je nasumičan jer zavisi od rasporeda po vremenu pristupa, što dovodi do usporenja ako je disk povezan na magistralu kojoj godi da zaredom dobija susedne podatke, ili je u pitanju uređaj koji ima fizička ograničenja brzine skokova poput hard diska.
 
 Vreme između dva pisanja na disk i broj čuvanih kopija su podesivi parametri fajlsistema i njihove vrednosti zavise od prioriteta korisnika: ako zauzeće radne memorije nije problem, broj keširanih stavki može biti velik, a ako gubitak podataka pri havariji nije presudan, vreme između dva pisanja isto može biti veliko. Podrazumevan period čekanja između dva upisa je jedan sekund, a broj stavki 131072. Jedini izuzetak, kada se pri zahtevu na disk piše sigurno je pri zatvaranju fajlsistema.
-
-\pagebreak
 
 ## Sučelje sa operativnim sistemom
 

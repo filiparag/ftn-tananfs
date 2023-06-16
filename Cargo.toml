@@ -1,6 +1,7 @@
 [package]
-name = "os-filesystem"
-version = "0.1.0"
+name = "tananfs"
+description = "Educational FUSE filesystem with little metadata"
+version = "0.1.1"
 edition = "2021"
 authors = ["Filip Parag <filip@parag.rs>"]
 license = "MIT"
